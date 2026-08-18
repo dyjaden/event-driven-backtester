@@ -6,7 +6,12 @@ from backtester.data import HistoricBarHandler
 from backtester.engine import Backtest
 from backtester.events import FillEvent
 from backtester.execution import NaiveExecutionHandler
-from backtester.portfolio import Portfolio
+from backtester.portfolio import (
+    FixedFractionalSizer,
+    FixedQuantitySizer,
+    Portfolio,
+    TargetWeightSizer,
+)
 from backtester.strategy import BuyAndHoldStrategy
 
 
@@ -79,4 +84,58 @@ def test_rejects_bad_construction():
     with pytest.raises(ValueError):
         Portfolio(initial_capital=0)
     with pytest.raises(ValueError):
-        Portfolio(target_weight=1.5)
+        TargetWeightSizer(weight=1.5)
+    with pytest.raises(ValueError):
+        FixedQuantitySizer(quantity=0)
+
+def test_default_sizer_is_target_weight_one():
+    pf = Portfolio()
+    assert isinstance(pf.sizer, TargetWeightSizer)
+    assert pf.sizer.weight == 1.0
+
+
+def test_fixed_quantity_buys_exactly_n_shares():
+    frame = make_frame(10)
+    data = HistoricBarHandler(frame, "TEST")
+    pf = Portfolio(initial_capital=100_000.0,
+                   sizer=FixedQuantitySizer(25))
+    Backtest(data, BuyAndHoldStrategy(data), pf,
+             NaiveExecutionHandler()).run()
+    assert pf.positions["TEST"] == 25
+
+
+def test_half_weight_holds_half_the_shares():
+    frame = make_frame(10)
+    full, half = [], []
+    for sizer, out in ((TargetWeightSizer(1.0), full),
+                       (TargetWeightSizer(0.5), half)):
+        data = HistoricBarHandler(frame, "TEST")
+        pf = Portfolio(initial_capital=100_000.0, sizer=sizer)
+        Backtest(data, BuyAndHoldStrategy(data), pf,
+                 NaiveExecutionHandler()).run()
+        out.append(pf.positions["TEST"])
+    assert half[0] == pytest.approx(full[0] / 2, abs=1)
+
+
+def test_compounding_and_non_compounding_differ_when_resignalled():
+    """The whole point of having two sizers.
+
+    Buy-and-hold signals once, so both agree. A strategy that re-signals
+    after the account has grown does not: target-weight scales the position
+    up, fixed-fractional does not.
+    """
+    price, equity, capital = 100.0, 200_000.0, 100_000.0   # account doubled
+    tw = TargetWeightSizer(1.0).target_quantity(
+        direction=1, price=price, equity=equity, initial_capital=capital)
+    ff = FixedFractionalSizer(1.0).target_quantity(
+        direction=1, price=price, equity=equity, initial_capital=capital)
+    assert tw == 2000
+    assert ff == 1000
+    assert tw > ff
+
+
+def test_short_direction_is_not_over_sized():
+    """int(x / p) truncates toward zero. Floor division would not."""
+    qty = TargetWeightSizer(1.0).target_quantity(
+        direction=-1, price=10.0, equity=1005.0, initial_capital=1005.0)
+    assert qty == -100        # NOT -101

@@ -7,6 +7,69 @@ import pandas as pd
 from .data import HistoricBarHandler
 from .events import FillEvent, MarketEvent, OrderEvent, SignalEvent
 
+from abc import ABC, abstractmethod
+
+
+class Sizer(ABC):
+    """Decides HOW MANY shares to hold. Never decides direction.
+
+    Direction is the Strategy's job and arrives in the SignalEvent. This
+    object answers only the size question, which is the part you control.
+    """
+
+    @abstractmethod
+    def target_quantity(self, *, direction: int, price: float,
+                        equity: float, initial_capital: float) -> int:
+        """Signed target position. Negative means short."""
+        ...
+
+
+class TargetWeightSizer(Sizer):
+    """Hold `weight` of CURRENT equity.
+
+    Compounds: as the account grows the position grows with it. This is what
+    Day 4 did, and it is the default.
+    """
+
+    def __init__(self, weight: float = 1.0) -> None:
+        if not 0.0 < weight <= 1.0:
+            raise ValueError("weight must be in (0, 1]")
+        self.weight = float(weight)
+
+    def target_quantity(self, *, direction, price, equity, initial_capital):
+        return int(equity * self.weight * direction / price)
+
+
+class FixedFractionalSizer(Sizer):
+    """Hold `fraction` of INITIAL capital.
+
+    Does NOT compound: constant dollar exposure for the whole run. Losses do
+    not shrink the position and gains do not grow it.
+    """
+
+    def __init__(self, fraction: float = 1.0) -> None:
+        if not 0.0 < fraction <= 1.0:
+            raise ValueError("fraction must be in (0, 1]")
+        self.fraction = float(fraction)
+
+    def target_quantity(self, *, direction, price, equity, initial_capital):
+        return int(initial_capital * self.fraction * direction / price)
+
+
+class FixedQuantitySizer(Sizer):
+    """Always exactly N shares, whatever the account is worth.
+
+    Mostly a test instrument: it makes expected values trivial to compute
+    by hand.
+    """
+
+    def __init__(self, quantity: int = 100) -> None:
+        if quantity <= 0:
+            raise ValueError("quantity must be positive")
+        self.quantity = int(quantity)
+
+    def target_quantity(self, *, direction, price, equity, initial_capital):
+        return self.quantity * direction
 
 class Portfolio:
     """Owns the money.
@@ -16,14 +79,12 @@ class Portfolio:
     """
 
     def __init__(self, initial_capital: float = 100_000.0,
-                 target_weight: float = 1.0) -> None:
+                 sizer: Sizer | None = None) -> None:
         if initial_capital <= 0:
             raise ValueError("initial_capital must be positive")
-        if not 0.0 < target_weight <= 1.0:
-            raise ValueError("target_weight must be in (0, 1]")
 
         self.initial_capital = float(initial_capital)
-        self.target_weight = float(target_weight)
+        self.sizer = sizer if sizer is not None else TargetWeightSizer(1.0)
 
         self.cash = float(initial_capital)
         self.positions: dict[str, int] = {}
@@ -54,8 +115,12 @@ class Portfolio:
             return
 
         held = self.positions.get(event.symbol, 0)
-        target_value = self.equity(data) * self.target_weight * event.direction
-        target_qty = int(target_value / price)      # truncates toward zero
+        target_qty = self.sizer.target_quantity(
+            direction=event.direction,
+            price=price,
+            equity=self.equity(data),
+            initial_capital=self.initial_capital,
+        )
         delta = target_qty - held
 
         if delta == 0:

@@ -80,19 +80,41 @@ class Backtest:
         return self.counts
 
 def _demo() -> None:
-    """Smoke test: stream the SPY parquet through the loop."""
+    from .metrics import summary
+    from .portfolio import Portfolio
+    from .execution import NaiveExecutionHandler
+    from .strategy import BuyAndHoldStrategy
+
     frame = pd.read_parquet("data/SPY_daily.parquet")
     data = HistoricBarHandler(frame, symbol="SPY")
-    strategy = BuyAndHoldStrategy(data)
-    bt = Backtest(data, strategy, verbose=False)
+    portfolio = Portfolio(initial_capital=100_000.0)
 
+    bt = Backtest(
+        data=data,
+        strategy=BuyAndHoldStrategy(data),
+        portfolio=portfolio,
+        execution=NaiveExecutionHandler(),
+    )
     counts = bt.run()
-    print(f"bars streamed : {counts['MarketEvent']}")
-    print(f"signals       : {counts['SignalEvent']}")
-    print(f"first bar     : {frame.index[0].date()}")
-    print(f"last bar      : {frame.index[-1].date()}")
+
+    equity = portfolio.equity_curve()
+    print(f"bars     : {counts['MarketEvent']}")
+    print(f"fills    : {counts['FillEvent']}")
+    print(f"final eq : ${equity.iloc[-1]:,.2f}")
+    print()
+    for k, v in summary(equity).items():
+        if k == "n_periods":
+            print(f"{k:>16}: {v}")
+        elif "return" in k or "drawdown" in k or k in ("cagr", "hit_rate",
+                                                       "ann_volatility"):
+            print(f"{k:>16}: {v:>8.2%}")
+        else:
+            print(f"{k:>16}: {v:>8.2f}")
+
+    from .plotting import plot_equity_vs_benchmark
+    path = plot_equity_vs_benchmark(equity, frame["close"])
+    print(f"\nchart -> {path}")
 
 
 if __name__ == "__main__":
-    from .strategy import BuyAndHoldStrategy
     _demo()
