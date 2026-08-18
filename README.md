@@ -16,7 +16,7 @@ Event-driven engine with portfolio accounting, Zero transaction costs so far
 | Max drawdown | -33.71% |
 | Periods | 2765 |
 
-### What this is not yet
+### Limitations so far
 
 - **No transaction costs.** No commission, no spread, no market impact. Day 6-7
 - **Survivorship-biased data.** Yahoo Finance serves currently listed tickers
