@@ -226,6 +226,7 @@ data/
 *.pkl
 results/*.png
 !results/.gitkeep
+!results/equity_curve.png
 .ipynb_checkpoints/
 .vscode/
 *.log
