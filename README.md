@@ -16,6 +16,19 @@ Event-driven engine with portfolio accounting, Zero transaction costs so far
 | Max drawdown | -33.71% |
 | Periods | 2765 |
 
+## Installation
+
+```bash
+git clone https://github.com/dyjaden/event-driven-backtester.git
+cd event-driven-backtester
+python -m venv .venv && .venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+python -m pytest
+```
+
+To reproduce the exact figures below, install the pinned versions instead:
+`python -m pip install -r requirements.txt`
+
 ### Limitations so far
 
 - **No transaction costs.** No commission, no spread, no market impact. Day 6-7
