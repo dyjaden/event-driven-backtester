@@ -1,7 +1,10 @@
 """Bar streaming. The ONLY component allowed to touch raw data."""
 from __future__ import annotations
 import queue
+
+import numpy as np
 import pandas as pd
+
 from .events import MarketEvent
 
 REQUIRED = ["open", "high", "low", "close", "volume"]
@@ -52,3 +55,21 @@ class HistoricBarHandler:
 
     def current_price(self, field: str = "close") -> float:
         return float(self.frame.iloc[self._i][field])
+
+    def adv(self, window: int = 21) -> float:
+        """Trailing average daily volume, in shares.
+
+        Uses bars up to and INCLUDING the current one. Never the full sample.
+        """
+        bars = self.latest_bars(window)
+        if bars.empty or "volume" not in bars.columns:
+            return float("nan")
+        return float(bars["volume"].mean())
+
+    def trailing_volatility(self, window: int = 21) -> float:
+        """Trailing daily log-return standard deviation."""
+        bars = self.latest_bars(window + 1)
+        if len(bars) < 3:
+            return float("nan")
+        returns = np.log(bars["close"]).diff().dropna()
+        return float(returns.std(ddof=1))

@@ -1,5 +1,7 @@
 """Transaction cost models. Pure functions of an order, no engine coupling."""
 from __future__ import annotations
+
+import math
 from abc import ABC, abstractmethod
 
 
@@ -69,3 +71,49 @@ class HalfSpreadSlippage(SlippageModel):
     def fill_price(self, quantity: int, mid: float) -> float:
         half = mid * (self.spread_bps / 10_000.0) / 2.0
         return mid + half if quantity > 0 else mid - half
+
+# ----------------------------------------------------------------- impact
+class ImpactModel(ABC):
+    @abstractmethod
+    def price_move(self, quantity: int, price: float,
+                   adv: float, daily_vol: float) -> float:
+        """Per-share price displacement. Always POSITIVE, like commission.
+
+        The caller decides the direction: a buy fills above, a sell below.
+        """
+
+
+class ZeroImpact(ImpactModel):
+    """The baseline arm. Assumes you are infinitely small."""
+
+    def price_move(self, quantity: int, price: float,
+                   adv: float, daily_vol: float) -> float:
+        return 0.0
+
+
+class SquareRootImpact(ImpactModel):
+    """Almgren-Chriss square-root law.
+
+        move / price = coefficient * daily_vol * sqrt(|Q| / ADV)
+
+    At Q = ADV the move is exactly `coefficient` daily standard deviations,
+    so coefficient = 1.0 encodes the standard rule of thumb: consuming a
+    full day's volume costs about one sigma.
+
+    Empirical estimates of the coefficient range roughly 0.3 to 1.5. It is
+    an assumption, not a measurement, so results are reported across a range.
+    """
+
+    def __init__(self, coefficient: float = 1.0) -> None:
+        if coefficient < 0:
+            raise ValueError("coefficient must be non-negative")
+        self.coefficient = coefficient
+
+    def price_move(self, quantity: int, price: float,
+                   adv: float, daily_vol: float) -> float:
+        # `not (x > 0)` rather than `x <= 0`, because NaN fails both
+        # comparisons and must fall through to the zero branch.
+        if quantity == 0 or not (adv > 0) or not (daily_vol > 0):
+            return 0.0
+        participation = abs(quantity) / adv
+        return price * self.coefficient * daily_vol * math.sqrt(participation)

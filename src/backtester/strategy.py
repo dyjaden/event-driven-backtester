@@ -16,27 +16,27 @@ class Strategy(ABC):
 
 
 class BuyAndHoldStrategy(Strategy):
-    """Goes long on the first bar and never changes its mind.
+    """Goes long once and never changes its mind.
 
-    Deliberately trivial. Its job is to be a known-answer baseline: with zero
-    costs, a buy-and-hold backtest MUST reproduce the asset's own return. If it
-    does not, the engine is wrong, not the strategy.
+    `warmup` suppresses the signal for the first N bars. It defaults to 0, so
+    every existing test is unaffected. Set it when the execution model needs
+    trailing statistics that do not exist on bar 0.
     """
 
-    def __init__(self, data: HistoricBarHandler) -> None:
+    def __init__(self, data: HistoricBarHandler, warmup: int = 0) -> None:
+        if warmup < 0:
+            raise ValueError("warmup cannot be negative")
         self.data = data
+        self.warmup = int(warmup)
         self.invested = False
+        self._bars_seen = 0
 
     def on_market(self, event: MarketEvent, events: queue.Queue) -> None:
-        if self.invested:
+        self._bars_seen += 1
+        if self.invested or self._bars_seen <= self.warmup:
             return
-        events.put(
-            SignalEvent(
-                timestamp=event.timestamp,
-                symbol=self.data.symbol,
-                direction=1,
-            )
-        )
+        events.put(SignalEvent(timestamp=event.timestamp,
+                               symbol=self.data.symbol, direction=1))
         self.invested = True
 
 class AlternatingStrategy(Strategy):
