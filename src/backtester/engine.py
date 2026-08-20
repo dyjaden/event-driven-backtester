@@ -78,7 +78,21 @@ class Backtest:
                 self._handle(event)
 
         return self.counts
-    
+
+def _run_pf(frame, strategy_cls, execution, capital=100_000.0):
+    """One full backtest. Returns the Portfolio, which holds BOTH the equity
+    curve and the fills, so no caller ever has to run the same thing twice."""
+    from .portfolio import Portfolio
+    data = HistoricBarHandler(frame, symbol="SPY")
+    pf = Portfolio(initial_capital=capital)
+    Backtest(data, strategy_cls(data), pf, execution).run()
+    return pf
+
+
+def _run(frame, strategy_cls, execution, capital=100_000.0):
+    """Equity curve only. Most callers want just this."""
+    return _run_pf(frame, strategy_cls, execution, capital).equity_curve()
+
 def _demo() -> None:
     """Day 6 asked whether costs kill the strategy. Day 7 asks how big it can get."""
     from functools import partial

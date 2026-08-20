@@ -1,9 +1,3 @@
-"""Cost model unit tests, plus the execution-handler tests that prove the
-models are reached and that no cost is charged twice.
-
-Day 6 built the commission and slippage sections.
-Day 7 added the participation cap and the impact accounting section.
-"""
 import queue
 
 import numpy as np
@@ -19,9 +13,11 @@ from backtester.costs import (
     ZeroSlippage,
 )
 from backtester.data import HistoricBarHandler
+from backtester.engine import Backtest
 from backtester.events import FillEvent, OrderEvent
 from backtester.execution import SimulatedExecutionHandler
 from backtester.portfolio import Portfolio
+from backtester.strategy import BuyAndHoldStrategy
 
 
 def make_frame(n=10, start=100.0, step=1.0):
@@ -201,3 +197,31 @@ def test_zero_impact_handler_reports_no_impact_cost():
     handler.on_order(_order(data, 500_000), events, data)
 
     assert events.get().impact_cost == 0.0
+
+# ================================================ Day 7: the warm-up integration
+def test_impact_is_actually_reached_end_to_end():
+    """The bug every test above missed.
+
+    Buy-and-hold signals on bar 0, where latest_bars() holds a single row,
+    so trailing_volatility returns NaN and SquareRootImpact correctly
+    returns zero. Eight green unit tests, zero impact in the real run.
+    A warm-up is what makes the trailing window exist before it is used.
+    """
+    frame = make_frame(60)
+    data = HistoricBarHandler(frame, "TEST")
+    pf = Portfolio(initial_capital=100_000_000.0)
+    Backtest(data, BuyAndHoldStrategy(data, warmup=21), pf,
+             SimulatedExecutionHandler(impact=SquareRootImpact(1.0))).run()
+
+    assert sum(f.impact_cost for f in pf.fills) > 0
+
+
+def test_without_warmup_a_bar_zero_trade_pays_no_impact():
+    """Pins the trap so it cannot come back silently."""
+    frame = make_frame(60)
+    data = HistoricBarHandler(frame, "TEST")
+    pf = Portfolio(initial_capital=100_000_000.0)
+    Backtest(data, BuyAndHoldStrategy(data), pf,
+             SimulatedExecutionHandler(impact=SquareRootImpact(1.0))).run()
+
+    assert sum(f.impact_cost for f in pf.fills) == 0

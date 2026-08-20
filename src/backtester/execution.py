@@ -50,8 +50,7 @@ class SimulatedExecutionHandler:
         daily_vol = data.trailing_volatility(self.window)
         move = self.impact_model.price_move(quantity, mid, adv, daily_vol)
 
-        # Slippage rides in the PRICE. Impact rides in impact_cost. See the
-        # callout below: Portfolio.on_fill already debits FillEvent.total_cost,
+        # Slippage rides in the PRICE. Impact rides in impact_cost. Portfolio.on_fill already debits FillEvent.total_cost,
         # so putting impact in both places charges it twice.
         fill_price = self.slippage_model.fill_price(quantity, mid)
         commission = self.commission_model.commission(quantity, fill_price)
