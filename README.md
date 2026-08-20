@@ -31,7 +31,10 @@ To reproduce the exact figures below, install the pinned versions instead:
 
 ### Limitations so far
 
-- **No transaction costs.** No commission, no spread, no market impact. Day 6-7
+- **Costs modelled: commission and half-spread. Market impact is not yet
+  included**, so results overstate achievable performance at size. Day 7.
+- **The spread assumption is a parameter, not a measurement.** Results are
+  reported across 1-5 bp rather than at a single value.
 - **Survivorship-biased data.** Yahoo Finance serves currently listed tickers
   only. Migrating to CRSP for delisting returns. Day 8
 - **Same-bar fills.** Orders fill at the close the decision was made on, which

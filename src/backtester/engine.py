@@ -78,42 +78,52 @@ class Backtest:
                 self._handle(event)
 
         return self.counts
+    
+def _run(frame, strategy_cls, execution, capital=100_000.0):
+    """One full backtest. Returns the equity curve."""
+    from .portfolio import Portfolio
+    data = HistoricBarHandler(frame, symbol="SPY")
+    pf = Portfolio(initial_capital=capital)
+    Backtest(data, strategy_cls(data), pf, execution).run()
+    return pf.equity_curve()
+
 
 def _demo() -> None:
+    """Costs off vs costs on, on two strategies with very different turnover."""
+    from .costs import HalfSpreadSlippage, PerShareCommission
+    from .execution import NaiveExecutionHandler, SimulatedExecutionHandler
     from .metrics import summary
-    from .portfolio import Portfolio
-    from .execution import NaiveExecutionHandler
-    from .strategy import BuyAndHoldStrategy
+    from .plotting import plot_equity_vs_benchmark
+    from .strategy import AlternatingStrategy, BuyAndHoldStrategy
 
     frame = pd.read_parquet("data/SPY_daily.parquet")
-    data = HistoricBarHandler(frame, symbol="SPY")
-    portfolio = Portfolio(initial_capital=100_000.0)
 
-    bt = Backtest(
-        data=data,
-        strategy=BuyAndHoldStrategy(data),
-        portfolio=portfolio,
-        execution=NaiveExecutionHandler(),
-    )
-    counts = bt.run()
+    def costly(bps):
+        return SimulatedExecutionHandler(
+            commission=PerShareCommission(),
+            slippage=HalfSpreadSlippage(spread_bps=bps),
+        )
 
-    equity = portfolio.equity_curve()
-    print(f"bars     : {counts['MarketEvent']}")
-    print(f"fills    : {counts['FillEvent']}")
-    print(f"final eq : ${equity.iloc[-1]:,.2f}")
+    print("BUY AND HOLD (1 trade)")
+    free = _run(frame, BuyAndHoldStrategy, NaiveExecutionHandler())
+    print(f"  costs off      : ${free.iloc[-1]:>12,.2f}   {free.iloc[-1]/1e5-1:>8.2%}")
+    for bps in (1.0, 2.0, 5.0):
+        eq = _run(frame, BuyAndHoldStrategy, costly(bps))
+        print(f"  costs on {bps:>4.1f}bp : ${eq.iloc[-1]:>12,.2f}   "
+              f"{eq.iloc[-1]/1e5-1:>8.2%}   drag ${free.iloc[-1]-eq.iloc[-1]:,.2f}")
+
+    print("\nALTERNATING (round trip every 2 bars)")
+    alt_free = _run(frame, AlternatingStrategy, NaiveExecutionHandler())
+    print(f"  costs off      : ${alt_free.iloc[-1]:>12,.2f}")
+    for bps in (1.0, 2.0, 5.0):
+        eq = _run(frame, AlternatingStrategy, costly(bps))
+        print(f"  costs on {bps:>4.1f}bp : ${eq.iloc[-1]:>12,.2f}   "
+              f"{eq.iloc[-1]/alt_free.iloc[-1]:>7.1%} of the costs-off result survives")
+
     print()
-    for k, v in summary(equity).items():
-        if k == "n_periods":
-            print(f"{k:>16}: {v}")
-        elif "return" in k or "drawdown" in k or k in ("cagr", "hit_rate",
-                                                       "ann_volatility"):
-            print(f"{k:>16}: {v:>8.2%}")
-        else:
-            print(f"{k:>16}: {v:>8.2f}")
-
-    from .plotting import plot_equity_vs_benchmark
-    path = plot_equity_vs_benchmark(equity, frame["close"])
-    print(f"\nchart -> {path}")
+    for k, v in summary(free).items():
+        print(f"{k:>16}: {v}")
+    print(f"\nchart -> {plot_equity_vs_benchmark(free, frame['close'])}")
 
 
 if __name__ == "__main__":

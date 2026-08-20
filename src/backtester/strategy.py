@@ -38,3 +38,23 @@ class BuyAndHoldStrategy(Strategy):
             )
         )
         self.invested = True
+
+class AlternatingStrategy(Strategy):
+    """Flips between fully long and flat on every single bar.
+
+    Nobody would trade this. It exists because buy-and-hold trades ONCE, which
+    hides the cost model completely. To see costs you need turnover, and this
+    generates the maximum possible amount of it.
+    """
+
+    def __init__(self, data: HistoricBarHandler) -> None:
+        self.data = data
+        self.long = False
+
+    def on_market(self, event: MarketEvent, events: queue.Queue) -> None:
+        self.long = not self.long
+        events.put(SignalEvent(
+            timestamp=event.timestamp,
+            symbol=self.data.symbol,
+            direction=1 if self.long else 0,
+        ))

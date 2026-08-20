@@ -139,3 +139,50 @@ def test_short_direction_is_not_over_sized():
     qty = TargetWeightSizer(1.0).target_quantity(
         direction=-1, price=10.0, equity=1005.0, initial_capital=1005.0)
     assert qty == -100        # NOT -101
+
+from backtester.costs import HalfSpreadSlippage, PerShareCommission
+from backtester.execution import SimulatedExecutionHandler
+from backtester.strategy import AlternatingStrategy
+
+
+def _final_equity(frame, strategy_cls, execution):
+    data = HistoricBarHandler(frame, "TEST")
+    pf = Portfolio(initial_capital=100_000.0)
+    Backtest(data, strategy_cls(data), pf, execution).run()
+    return pf.equity_curve().iloc[-1]
+
+
+def _costly():
+    return SimulatedExecutionHandler(
+        commission=PerShareCommission(),
+        slippage=HalfSpreadSlippage(spread_bps=10.0),
+    )
+
+
+def test_costs_reduce_final_equity():
+    frame = make_frame(50)
+    free = _final_equity(frame, BuyAndHoldStrategy, NaiveExecutionHandler())
+    paid = _final_equity(frame, BuyAndHoldStrategy, _costly())
+    assert paid < free
+
+
+def test_turnover_amplifies_the_same_cost_model():
+    """THE lesson of Day 6.
+
+    Identical cost model. The only difference is how often the strategy
+    trades. Costs are nearly invisible on buy-and-hold and severe on a
+    high-turnover strategy, which is why turnover belongs in every honest
+    performance report.
+    """
+    frame = make_frame(50)
+
+    bh_free = _final_equity(frame, BuyAndHoldStrategy, NaiveExecutionHandler())
+    bh_paid = _final_equity(frame, BuyAndHoldStrategy, _costly())
+
+    alt_free = _final_equity(frame, AlternatingStrategy, NaiveExecutionHandler())
+    alt_paid = _final_equity(frame, AlternatingStrategy, _costly())
+
+    bh_drag = 1.0 - bh_paid / bh_free
+    alt_drag = 1.0 - alt_paid / alt_free
+
+    assert alt_drag > bh_drag * 10
