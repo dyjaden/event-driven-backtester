@@ -1,7 +1,6 @@
 """The event loop. Time advances here and nowhere else."""
 from __future__ import annotations
 import queue
-from typing import Optional
 
 import pandas as pd
 
@@ -79,6 +78,7 @@ class Backtest:
 
         return self.counts
 
+
 def _run_pf(frame, strategy_cls, execution, capital=100_000.0):
     """One full backtest. Returns the Portfolio, which holds BOTH the equity
     curve and the fills, so no caller ever has to run the same thing twice."""
@@ -92,6 +92,7 @@ def _run_pf(frame, strategy_cls, execution, capital=100_000.0):
 def _run(frame, strategy_cls, execution, capital=100_000.0):
     """Equity curve only. Most callers want just this."""
     return _run_pf(frame, strategy_cls, execution, capital).equity_curve()
+
 
 def _demo() -> None:
     """Day 6 asked whether costs kill the strategy. Day 7 asks how big it can get."""
@@ -111,4 +112,50 @@ def _demo() -> None:
     BH = partial(BuyAndHoldStrategy, warmup=WARMUP)
 
     def sized(coef, cap=None):
-        ...
+        return SimulatedExecutionHandler(
+            commission=PerShareCommission(),
+            slippage=HalfSpreadSlippage(spread_bps=1.0),
+            impact=SquareRootImpact(coefficient=coef),
+            max_participation=cap,
+        )
+
+    print(f"CAPACITY CURVE -- buy and hold, impact coefficient 1.0, "
+          f"warmup {WARMUP} bars")
+    print(f"{'AUM':>16} {'total ret':>11} {'impact $':>16} {'bp of AUM':>10} {'ratio':>7}")
+    prev = None
+    for aum in (1e5, 1e6, 1e7, 1e8, 1e9, 1e10):
+        pf = _run_pf(frame, BH, sized(1.0), capital=aum)
+        eq = pf.equity_curve()
+        paid = sum(f.impact_cost for f in pf.fills)
+        bp = paid / aum * 1e4
+        ratio = f"{bp / prev:.2f}x" if prev else "  --"
+        print(f"${aum:>15,.0f} {eq.iloc[-1]/aum-1:>11.2%} ${paid:>15,.0f} "
+              f"{bp:>10.2f} {ratio:>7}")
+        prev = bp
+
+    print("\nSAME AUM, COEFFICIENT SWEEP at $1B (the parameter nobody audits)")
+    for coef in (0.3, 0.5, 1.0, 1.5):
+        pf = _run_pf(frame, BH, sized(coef), capital=1e9)
+        paid = sum(f.impact_cost for f in pf.fills)
+        print(f"  Y = {coef:>3.1f} : total return "
+              f"{pf.equity_curve().iloc[-1]/1e9-1:>8.2%}   impact ${paid:>14,.0f}")
+
+    print("\nPARTICIPATION CAP at 10% of trailing ADV")
+    for aum in (1e8, 1e9, 1e10):
+        free = _run_pf(frame, BH, sized(1.0), capital=aum)
+        cap = _run_pf(frame, BH, sized(1.0, 0.10), capital=aum)
+        got = cap.positions.get("SPY", 0)
+        want = free.positions.get("SPY", 0)
+        print(f"  ${aum:>14,.0f} : uncapped {free.equity_curve().iloc[-1]/aum-1:>8.2%}   "
+              f"capped {cap.equity_curve().iloc[-1]/aum-1:>8.2%}   "
+              f"shares {got:,} of {want:,} ({got/want if want else 0:.0%})")
+
+    # Headline baseline stays UNWARMED so it remains comparable to Days 1-6.
+    print("\nBASELINE -- zero cost, no warmup (the Day 4 result, unchanged)")
+    base = _run(frame, BuyAndHoldStrategy, NaiveExecutionHandler())
+    for k, v in summary(base).items():
+        print(f"{k:>16}: {v}")
+
+
+if __name__ == "__main__":
+    _demo()
