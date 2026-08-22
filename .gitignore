@@ -219,6 +219,11 @@ __marimo__/
 
 # ---- project specific ----
 .venv/
+
+# A second environment exists only to run scripts/pull_crsp.py: the wrds
+# package hard-pins pandas<2.3 and the engine needs pandas>=3.
+.venv-*/
+
 data/
 *.csv
 *.parquet
