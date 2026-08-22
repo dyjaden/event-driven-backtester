@@ -8,6 +8,10 @@ from .data import HistoricBarHandler
 from .events import FillEvent, MarketEvent, OrderEvent, SignalEvent
 from .strategy import Strategy
 
+# Flipped by hand as the data improves: Day 8-1 writes the dollar-volume
+# repair, Day 8-2 writes the CRSP pull. One constant, one edit per migration.
+DEMO_DATA = "data/SPY_daily_dollarvol.parquet"
+
 
 class Backtest:
     """Drives a single backtest from the first bar to the last.
@@ -104,7 +108,7 @@ def _demo() -> None:
     from .metrics import summary
     from .strategy import BuyAndHoldStrategy
 
-    frame = pd.read_parquet("data/SPY_daily.parquet")
+    frame = pd.read_parquet(DEMO_DATA)
 
     # Trailing ADV and volatility do not exist on bar 0. A strategy that
     # trades there gets NaN inputs and therefore zero impact, silently.
