@@ -25,15 +25,44 @@ SP500 = "crsp_a_indexes.dsp500list_v2"
 
 # The standard US common-stock screen, in CIZ's flag columns. SIZ said
 # `shrcd in (10, 11) and exchcd in (1, 2, 3)`; that is five flags now.
+#
+# The screen must not delete the corpses (found 24 Aug 2026, live data).
+# On the delisting day the security's info spell flips to placeholders --
+# SVB's last row reads sharetype 'N/A', securitysubtype 'UNK',
+# conditionaltype 'N/A', tradingstatusflg 'D' -- so EVERY condition below
+# fails on exactly the row that carries dlydelflg = 'Y' and the delisting
+# return. Screened naively, the file contains zero delistings and the
+# survivorship number quietly loses the final day of every dead company.
+# So: a row passes if it clears the screen, OR it is a delisting row for a
+# security that cleared the screen in the 30 days before it died. The
+# lookback covers halt gaps between last trade and formal delisting; a
+# stock halted for more than 30 days before delisting would still be
+# missed, which is rare and accepted.
 COMMON_STOCK = """
-      AND s.sharetype       = 'NS'
-      AND s.securitytype    = 'EQTY'
-      AND s.securitysubtype = 'COM'
-      AND s.usincflg        = 'Y'
-      AND s.issuertype      IN ('ACOR', 'CORP')
-      AND s.primaryexch     IN ('N', 'A', 'Q')
-      AND s.conditionaltype IN ('RW', 'NW')
-      AND s.tradingstatusflg = 'A'
+      AND (
+            (    s.sharetype       = 'NS'
+             AND s.securitytype    = 'EQTY'
+             AND s.securitysubtype = 'COM'
+             AND s.usincflg        = 'Y'
+             AND s.issuertype      IN ('ACOR', 'CORP')
+             AND s.primaryexch     IN ('N', 'A', 'Q')
+             AND s.conditionaltype IN ('RW', 'NW')
+             AND s.tradingstatusflg = 'A')
+         OR (d.dlydelflg = 'Y' AND EXISTS (
+                 SELECT 1
+                 FROM crsp.stksecurityinfohist s2
+                 WHERE s2.permno = d.permno
+                   AND s2.secinfostartdt <  d.dlycaldt
+                   AND s2.secinfoenddt   >= d.dlycaldt - INTERVAL '30 days'
+                   AND s2.sharetype       = 'NS'
+                   AND s2.securitytype    = 'EQTY'
+                   AND s2.securitysubtype = 'COM'
+                   AND s2.usincflg        = 'Y'
+                   AND s2.issuertype      IN ('ACOR', 'CORP')
+                   AND s2.primaryexch     IN ('N', 'A', 'Q')
+                   AND s2.conditionaltype IN ('RW', 'NW')
+                   AND s2.tradingstatusflg = 'A'))
+      )
 """
 
 
@@ -78,6 +107,11 @@ def pull_universe(db, start, end) -> pd.DataFrame:
     permno alone and a company that was an ADR in 2015 and common stock in
     2020 is either wholly in or wholly out -- which is look-ahead, applied to
     the universe rather than to prices.
+
+    Delisting rows are admitted through a carve-out in COMMON_STOCK (see the
+    comment there): their spell values are placeholders, so the plain screen
+    would silently drop every one. dlyret on a delisting row is CRSP's
+    delisting return when computable, and NA when it is not.
     """
     return db.raw_sql(f"""
         SELECT d.permno, d.dlycaldt, d.dlyret, d.dlyclose, d.dlyvol, d.dlydelflg

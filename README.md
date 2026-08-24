@@ -30,9 +30,14 @@ touching strategy logic.
 Engine, portfolio accounting, pluggable position sizing, commission and
 half-spread costs, square-root market impact and a participation cap. 91 tests.
 
-Every capacity figure below was **revised on 21 August 2026** after a defect was
-found in the input data, not in the model. See
-[Why these numbers changed](#why-these-numbers-changed).
+Data migrated from Yahoo Finance to **CRSP CIZ daily** (PERMNO-keyed,
+point-in-time universe, delisting returns) on 24 August 2026.
+
+Two published numbers have been revised after defects were found in the input
+data, not in the model: the capacity figures on 21 August 2026, and the
+survivorship measurement below, which nearly shipped without its delistings on
+24 August 2026. See [Why these numbers changed](#why-these-numbers-changed)
+and [What survivorship bias was worth](#what-survivorship-bias-was-worth).
 
 ## Headline result
 
@@ -44,14 +49,64 @@ If it does not, the engine is wrong, not the strategy.
 
 | Metric | Buy and hold, SPY, $100,000 |
 |---|---|
-| Total return | 302.56% |
-| CAGR | 13.54% |
+| Total return | 300.05% |
+| CAGR | 13.47% |
 | Volatility | 17.79% |
 | Sharpe | 0.80 |
-| Max drawdown | -33.71% |
-| Periods | 2765 |
+| Max drawdown | -33.70% |
+| Periods | 2766 |
 
-The -33.71% drawdown is the COVID crash, correctly reproduced.
+The -33.70% drawdown is the COVID crash, correctly reproduced.
+
+*Computed from CRSP data as of 24 August 2026. The prior yfinance-based figure
+was 302.56%; the raw price series reconcile to 0.08% over eleven years with a
+daily return correlation of 0.999995, and the residual is vendor dividend
+conventions, anchoring and integer-share cash drag.*
+
+## What survivorship bias was worth
+
+The section above measures the engine. This one measures the data. Two equally
+weighted baskets, rebalanced daily, zero costs; the only difference between
+them is who is in the basket on each date.
+
+- **Point-in-time:** S&P 500 membership as of each date, from CRSP's
+  constituent history. What you could actually have held.
+- **Today's list:** the current membership, applied to the whole history. What
+  almost every retail backtest does.
+
+| Universe | Total return, 2015-2025 | Annualised |
+|---|---|---|
+| Point-in-time S&P 500 membership | 224.4% | ~11.3% |
+| Today's membership list, applied to the whole history | 449.7% | **~16.8%** |
+
+**The gap is 5.48 percentage points a year**, and it is two errors measured
+jointly, not one. The dead are missing: a basket built from today's list never
+holds a company into its -100% final print. And the universe is chosen with
+information from the future: picking a 2015 portfolio from the 2026 list buys
+every index addition years before the run-up that got it added. The two cannot
+be separated by this experiment, and both push the same way.
+
+Universe definition, stated because it matters: S&P 500 members passing the
+CRSP US common-stock screen — about 450 of the ~503 names per day, since
+foreign-incorporated members and REITs fall outside the screen — keyed on
+PERMNO, with delisting returns included where CRSP computes one (97% of the
+window's 2,936 delistings; the worst is exactly -100%).
+
+This is a measurement of the data, not a strategy result: no costs, no sizing,
+no engine. A daily-rebalanced 450-name basket would be expensive to run, which
+is precisely why it is not presented as a strategy. It is what a backtest
+gives away by choosing its universe with information it did not have at the
+time.
+
+The measurement nearly shipped wrong. The first universe pull contained zero
+delistings in eleven years, because the standard common-stock screen checks
+share type and trading status per day — and on the day a security delists,
+CRSP flips those fields to placeholders, so the screen silently deleted every
+delisting row while looking perfectly healthy. The same bias the migration
+exists to remove, reintroduced by a WHERE clause. It was caught by writing
+down the expected count before the data arrived ("hundreds, not zero") and
+checking `value_counts()` on the delisting flag; the fix and the full
+post-mortem live in `scripts/pull_crsp.py`.
 
 ## Costs are decided by turnover, not by the cost model
 
@@ -96,9 +151,10 @@ and including the current one, never the full sample.
 | $1,000,000,000 | 303.68% | $1,971,040 | 19.71 | 3.16x |
 | $10,000,000,000 | 303.26% | $62,329,761 | 62.33 | 3.16x |
 
-*SPY, buy and hold, coefficient 1.0, 21-bar warm-up. The warmed arm enters 21
-bars later than the zero-cost baseline above, which is why its total return
-differs slightly.*
+*SPY, buy and hold, coefficient 1.0, 21-bar warm-up, computed on the
+dollar-volume-corrected yfinance series. The warmed arm enters 21 bars later
+than the zero-cost baseline above, which is why its total return differs
+slightly.*
 
 Because impact per share goes as the square root of participation, **cost in
 basis points scales as the square root of AUM**: every tenfold increase in size
@@ -192,7 +248,9 @@ writing down an invariant that ought to hold and asking whether the data already
 in the repository satisfied it. It did not.
 
 The repair is in `scripts/fix_yfinance_volume.py`, with the invariant asserted in
-`tests/test_yf_volume.py`.
+`tests/test_yf_volume.py`. CRSP later confirmed it from the outside: the
+CRSP-to-yfinance dollar-volume ratio reads 1.000 at both ends of the sample,
+two vendors agreeing on how many dollars traded.
 
 ## Installation
 
@@ -209,6 +267,18 @@ instead: `python -m pip install -r requirements.txt`
 
 Run the demo with `python -m backtester.engine`.
 
+### Data
+
+`data/` is gitignored: CRSP is licensed and never ships with the repository.
+With a WRDS account, `scripts/pull_crsp.py --start 2015-01-01 --end 2025-12-31
+--universe` rebuilds every file (the pull runs in a separate environment
+because the `wrds` package pins an older pandas; the Parquet handoff does not
+care). Without one, the engine runs on any OHLCV frame that keeps price and
+volume on a single basis; `scripts/fix_yfinance_volume.py` repairs Yahoo's
+mixed-basis files, and `scripts/make_fake_crsp.py` fabricates CIZ-shaped data
+so `scripts/crsp_report.py --data data/_dryrun` exercises the full reporting
+path with no subscription at all.
+
 ## Limitations
 
 Kept deliberately explicit. A backtest without this section should not be
@@ -219,11 +289,13 @@ believed.
   `close * volume` is not the traded notional unless it is rebased. This repo
   rebases it and asserts the invariant; it was wrong here for two sessions and
   moved a published capacity figure by 21%.
-- **Survivorship-biased data.** Yahoo Finance serves currently listed tickers
-  only, so every delisting is silently absent and the final near-total loss
-  never enters the calculation. Separately, choosing a historical universe from
-  today's index membership is look-ahead, because additions typically follow a
-  run-up. Migrating to CRSP for point-in-time membership and delisting returns.
+- **Point-in-time data, with delisting returns.** CRSP CIZ daily, keyed on
+  PERMNO rather than ticker, because tickers are recycled after delistings and
+  a ticker-keyed history splices two companies together at the seam. Universe
+  membership is as of each date rather than today's list, and the delisting
+  return sits inside the return series where CRSP computes one — 97% of this
+  window's 2,936 delistings. The measured cost of doing this wrong is 5.48
+  points a year, reported above, and is the reason the migration happened.
 - **The impact coefficient is an assumption, not a measurement.** Empirical
   estimates span roughly 0.3 to 1.5. Nobody audits this number and halving it
   roughly halves the modelled cost, so results are reported across a range.
@@ -240,7 +312,9 @@ believed.
   on, which is mildly optimistic. A conservative design fills at the next open.
 - **Cash drag.** Integer share counts leave a small uninvested remainder that
   never compounds, so total return sits slightly below the asset's own.
-- **One symbol.** Multi-asset support is next.
+- **One symbol.** The engine prices one instrument; the survivorship
+  measurement above runs on the return matrix in pandas, outside the engine,
+  for exactly that reason. Multi-asset support is next.
 
 ## Tests
 
