@@ -28,7 +28,10 @@ touching strategy logic.
 ## Status
 
 Engine, portfolio accounting, pluggable position sizing, commission and
-half-spread costs, square-root market impact and a participation cap. 91 tests.
+half-spread costs, square-root market impact and a participation cap.
+**Multi-symbol as of `v0.5`** (26 August 2026): a panel handler prices a
+cross-sectional book, with an explicit exit policy for names that delist
+mid-hold, and the first full costed strategy has run through it. 105 tests.
 
 Data migrated from Yahoo Finance to **CRSP CIZ daily** (PERMNO-keyed,
 point-in-time universe, delisting returns) on 24 August 2026.
@@ -38,6 +41,8 @@ data, not in the model: the capacity figures on 21 August 2026, and the
 survivorship measurement below, which nearly shipped without its delistings on
 24 August 2026. See [Why these numbers changed](#why-these-numbers-changed)
 and [What survivorship bias was worth](#what-survivorship-bias-was-worth).
+The first strategy result is below as well, and it is a loss, reported at
+full volume: [The first strategy, measured honestly](#the-first-strategy-measured-honestly).
 
 ## Headline result
 
@@ -107,6 +112,47 @@ exists to remove, reintroduced by a WHERE clause. It was caught by writing
 down the expected count before the data arrived ("hundreds, not zero") and
 checking `value_counts()` on the delisting flag; the fix and the full
 post-mortem live in `scripts/pull_crsp.py`.
+
+## The first strategy, measured honestly
+
+Cross-sectional momentum: 12-1 formation (rank every point-in-time S&P 500
+member by its trailing-year return, skipping the most recent month, because
+the shortest horizon reverses), monthly rebalance, **long-only top 50, equal
+weight**, 0.1% rebalance band. Every number came through the event loop —
+panel handler, portfolio, execution, cost models — and the benchmark is the
+point-in-time equal-weight basket measured above.
+
+| | $100,000 | $10,000,000 |
+|---|---|---|
+| Zero cost | 10.28%/yr | 11.02%/yr |
+| All costs on | 9.84%/yr | 10.44%/yr |
+| Turnover (both sides) | ~704%/yr | ~733%/yr |
+| Cost drag | 0.44 pp/yr | 0.57 pp/yr |
+| **Net vs the 11.32%/yr benchmark** | **-1.48 pp/yr** | **-0.87 pp/yr** |
+
+**The strategy lost to the basket it picks from, and that is the finding.**
+Long-only large-cap momentum over 2015–2025 — a window containing the 2016
+and 2020 momentum reversals — trailed point-in-time equal weight after costs
+at both sizes, and before costs at the small one. The pipeline was pointed
+at a strategy chosen for being the canonical first cross-sectional strategy,
+not for flattering results, and it reports turnover next to the return the
+way the cost sections above argue every honest backtest should. The
+literature's stronger version of this effect is long-short and reaches into
+smaller names; this engine has never shorted, and saying so is part of the
+result.
+
+Two implementation findings came with it. **A $100,000 account cannot fully
+implement equal-weight top 50 on the S&P**: a 2% slot is $2,000, an
+expensive stock rounds to zero shares, and the book held 47 of its 50 picks
+— most of the small-account shortfall is integer-share granularity, not
+signal. And **the cost structure flips with size**: commission dominates at
+$100k ($5.6k vs $738 of impact over eleven years), impact dominates at $10M
+($809k vs $65k), which is the square-root law doing exactly what the
+capacity section says it does.
+
+Full table in `results/momentum_baseline.md`. Reproduce with
+`python scripts/momentum_report.py` — it prints its own sanity checks and
+refuses a clean exit if any fail.
 
 ## Costs are decided by turnover, not by the cost model
 
@@ -276,8 +322,9 @@ because the `wrds` package pins an older pandas; the Parquet handoff does not
 care). Without one, the engine runs on any OHLCV frame that keeps price and
 volume on a single basis; `scripts/fix_yfinance_volume.py` repairs Yahoo's
 mixed-basis files, and `scripts/make_fake_crsp.py` fabricates CIZ-shaped data
-so `scripts/crsp_report.py --data data/_dryrun` exercises the full reporting
-path with no subscription at all.
+so `scripts/crsp_report.py --data data/_dryrun` and
+`scripts/momentum_report.py --data data/_dryrun` exercise the full reporting
+paths with no subscription at all.
 
 ## Limitations
 
@@ -311,10 +358,18 @@ believed.
 - **Same-bar fills.** Orders fill at the close of the bar the decision was made
   on, which is mildly optimistic. A conservative design fills at the next open.
 - **Cash drag.** Integer share counts leave a small uninvested remainder that
-  never compounds, so total return sits slightly below the asset's own.
-- **One symbol.** The engine prices one instrument; the survivorship
-  measurement above runs on the return matrix in pandas, outside the engine,
-  for exactly that reason. Multi-asset support is next.
+  never compounds, so total return sits slightly below the asset's own. On a
+  50-name book at $100k it stops being small: see the 47-of-50 finding above.
+- **Delisted holdings exit at CRSP's final value, with zero modelled
+  impact.** The delisting return is already inside that final price; the
+  exit is a forced trade nobody schedules, and charging impact on it would
+  mean modelling the market for a security that no longer trades.
+- **Long-only.** The engine prices a multi-symbol book as of `v0.5` (the
+  survivorship measurement above predates it and stays in pandas by
+  design), but it has never shorted: no borrow, no locates, no rebates. The
+  momentum result is long-only for exactly that reason, and the
+  literature's stronger long-short version is out of reach until shorting
+  is modelled honestly.
 
 ## Tests
 
@@ -322,13 +377,19 @@ believed.
 python -m pytest -q
 ```
 
-91 tests. The ones worth reading are the invariants rather than the happy
+105 tests. The ones worth reading are the invariants rather than the happy
 paths: that a zero-cost fill cannot change equity, that impact scales as the
 square root of size, that a cost is never charged twice, that a bar-zero trade
 pays no impact, which pins the warm-up boundary so that "fixing" it with a
-full-sample estimate fails loudly instead of quietly introducing look-ahead, and
+full-sample estimate fails loudly instead of quietly introducing look-ahead,
 that price times volume equals the dollars that traded, on every bar and from
-either data vendor.
+either data vendor, that a two-priced book is worth the sum of its positions
+rather than one close multiplied across everything (the multi-symbol
+refactor's known answer, and a bug a panel of identical prices cannot see),
+that a holding which delists mid-month exits at its last known price without
+a NaN ever reaching the equity curve, and that 12-1 momentum refuses a name
+whose entire run-up sits inside the skip month — the same panel run with
+skip=0 buys it, which is the off-by-a-month the test exists to catch.
 
 The one that matters most is `test_a_frame_already_on_one_basis_is_unchanged`.
 A repair that alters correct data is not a repair, and that is usually the test
