@@ -121,6 +121,10 @@ class PanelBarHandler:
         self._marks = close.ffill()          # last-known-price fallback
         self._last_valid = {s: close[s].last_valid_index()
                             for s in close.columns}
+        # positional index per symbol: scalar .iloc[row, pos] lookups instead
+        # of building a 1,000-wide row Series on every price query. Same
+        # answers; the difference is minutes of wall clock on an 11-year run.
+        self._pos = {s: i for i, s in enumerate(close.columns)}
         self._i = -1
         self.continue_backtest = True
 
@@ -142,12 +146,14 @@ class PanelBarHandler:
         events.put(MarketEvent(timestamp=self._close.index[self._i]))
 
     # ---------------------------------------------------------- plumbing
-    def _col(self, symbol):
+    def _col(self, symbol) -> int:
+        """Symbol -> column position, with the loud failures."""
         if symbol is None:
             raise ValueError("a panel handler needs a symbol; none was given")
-        if symbol not in self._close.columns:
+        pos = self._pos.get(symbol)
+        if pos is None:
             raise KeyError(f"unknown symbol {symbol!r}")
-        return symbol
+        return pos
 
     def _require_started(self) -> None:
         if self._i < 0 or self._i >= len(self._close):
@@ -163,12 +169,12 @@ class PanelBarHandler:
 
     def has_bar(self, symbol) -> bool:
         self._require_started()
-        return bool(pd.notna(self._close.iloc[self._i][self._col(symbol)]))
+        return bool(pd.notna(self._close.iloc[self._i, self._col(symbol)]))
 
     def is_dead(self, symbol) -> bool:
         """Past the last bar this name will ever print: the series has ended."""
         self._require_started()
-        last = self._last_valid[self._col(symbol)]
+        last = self._last_valid[self._close.columns[self._col(symbol)]]
         return last is None or self._close.index[self._i] > last
 
     def latest_closes(self, n: int = 1) -> pd.DataFrame:
@@ -185,7 +191,7 @@ class PanelBarHandler:
         if field != "close":
             raise ValueError("a panel carries close and volume only")
         self._require_started()
-        px = self._marks.iloc[self._i][self._col(symbol)]
+        px = self._marks.iloc[self._i, self._col(symbol)]
         if pd.isna(px):
             raise ValueError(
                 f"{symbol!r} has no price history by "
@@ -197,9 +203,9 @@ class PanelBarHandler:
         not zero; an all-missing window returns NaN, and the execution
         handler's policy for NaN statistics is to charge no impact."""
         self._require_started()
-        col = self._col(symbol)
+        pos = self._col(symbol)
         start = max(0, self._i - window + 1)
-        vol = self._volume[col].iloc[start:self._i + 1]
+        vol = self._volume.iloc[start:self._i + 1, pos]
         return float(vol.mean()) if vol.notna().any() else float("nan")
 
     def trailing_volatility(self, symbol: str | None = None,
@@ -207,9 +213,9 @@ class PanelBarHandler:
         """Trailing daily log-return standard deviation, from RAW closes so
         that gaps stay gaps rather than fake zero-volatility days."""
         self._require_started()
-        col = self._col(symbol)
+        pos = self._col(symbol)
         start = max(0, self._i - window)
-        closes = self._close[col].iloc[start:self._i + 1]
+        closes = self._close.iloc[start:self._i + 1, pos]
         returns = np.log(closes).diff().dropna()
         if len(returns) < 2:
             return float("nan")
