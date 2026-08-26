@@ -79,12 +79,22 @@ class Portfolio:
     """
 
     def __init__(self, initial_capital: float = 100_000.0,
-                 sizer: Sizer | None = None) -> None:
+                 sizer: Sizer | None = None,
+                 min_trade_fraction: float = 0.0) -> None:
         if initial_capital <= 0:
             raise ValueError("initial_capital must be positive")
+        if not 0.0 <= min_trade_fraction < 1.0:
+            raise ValueError("min_trade_fraction must be in [0, 1)")
 
         self.initial_capital = float(initial_capital)
         self.sizer = sizer if sizer is not None else TargetWeightSizer(1.0)
+        # The rebalance band (Day 9). Integer truncation makes a held name's
+        # target drift by a share or two as equity moves, and on a 50-name
+        # book every formation date would emit ~50 dust orders, each paying
+        # the commission minimum. Orders smaller than this fraction of
+        # current equity are skipped. 0.0 (the default) trades everything,
+        # which keeps every pre-Day-9 result byte-identical.
+        self.min_trade_fraction = float(min_trade_fraction)
 
         self.cash = float(initial_capital)
         self.positions: dict[str, int] = {}
@@ -125,6 +135,10 @@ class Portfolio:
 
         if delta == 0:
             return
+        if (self.min_trade_fraction
+                and abs(delta) * price
+                < self.min_trade_fraction * self.equity(data)):
+            return                      # dust: inside the rebalance band
         events.put(OrderEvent(timestamp=event.timestamp,
                               symbol=event.symbol,
                               quantity=delta))
