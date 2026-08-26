@@ -53,21 +53,27 @@ class HistoricBarHandler:
         start = max(0, self._i - n + 1)
         return self.frame.iloc[start:self._i + 1]
 
-    def current_price(self, field: str = "close") -> float:
+    def current_price(self, symbol: str | None = None, field: str = "close") -> float:
+        if symbol is not None and symbol != self.symbol:
+            raise KeyError(f"this handler serves {self.symbol!r}, not {symbol!r}")
         return float(self.frame.iloc[self._i][field])
 
-    def adv(self, window: int = 21) -> float:
+    def adv(self, symbol: str | None = None, window: int = 21) -> float:
         """Trailing average daily volume, in shares.
 
         Uses bars up to and INCLUDING the current one. Never the full sample.
         """
+        if symbol is not None and symbol != self.symbol:
+            raise KeyError(f"this handler serves {self.symbol!r}, not {symbol!r}")
         bars = self.latest_bars(window)
         if bars.empty or "volume" not in bars.columns:
             return float("nan")
         return float(bars["volume"].mean())
 
-    def trailing_volatility(self, window: int = 21) -> float:
+    def trailing_volatility(self, symbol: str | None = None, window: int = 21) -> float:
         """Trailing daily log-return standard deviation."""
+        if symbol is not None and symbol != self.symbol:
+            raise KeyError(f"this handler serves {self.symbol!r}, not {symbol!r}")
         bars = self.latest_bars(window + 1)
         if len(bars) < 3:
             return float("nan")

@@ -96,8 +96,8 @@ class Portfolio:
         """Market value of everything held. Single-symbol until Day 9."""
         if not self.positions:
             return 0.0
-        price = data.current_price()
-        return sum(qty * price for qty in self.positions.values())
+        return sum(qty * data.current_price(sym)
+             for sym, qty in self.positions.items() if qty)
 
     def equity(self, data: HistoricBarHandler) -> float:
         return self.cash + self.holdings_value(data)
@@ -110,7 +110,7 @@ class Portfolio:
     def on_signal(self, event: SignalEvent, events: queue.Queue,
                   data: HistoricBarHandler) -> None:
         """Turn a direction into a concrete share count."""
-        price = data.current_price()
+        price = data.current_price(event.symbol)
         if price <= 0:
             return
 

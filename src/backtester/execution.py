@@ -34,8 +34,8 @@ class SimulatedExecutionHandler:
 
     def on_order(self, event: OrderEvent, events: queue.Queue,
                  data: HistoricBarHandler) -> None:
-        mid = data.current_price()
-        adv = data.adv(self.window)
+        mid = data.current_price(event.symbol)
+        adv = data.adv(event.symbol, self.window)
         quantity = event.quantity
 
         # --- the hard constraint, applied BEFORE any cost is computed
@@ -47,7 +47,7 @@ class SimulatedExecutionHandler:
         if quantity == 0:
             return                      # nothing tradable this bar, no fill
 
-        daily_vol = data.trailing_volatility(self.window)
+        daily_vol = data.trailing_volatility(event.symbol, self.window)
         move = self.impact_model.price_move(quantity, mid, adv, daily_vol)
 
         # Slippage rides in the PRICE. Impact rides in impact_cost. Portfolio.on_fill already debits FillEvent.total_cost,
