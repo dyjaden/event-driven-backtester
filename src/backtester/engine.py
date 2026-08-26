@@ -10,7 +10,7 @@ from .strategy import Strategy
 
 # Flipped by hand as the data improves: Day 8-1 writes the dollar-volume
 # repair, Day 8-2 writes the CRSP pull. One constant, one edit per migration.
-DEMO_DATA = "data/SPY_daily_dollarvol.parquet"
+DEMO_DATA = "data/crsp_spy_daily.parquet"
 
 
 class Backtest:

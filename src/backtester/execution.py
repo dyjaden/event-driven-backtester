@@ -1,5 +1,6 @@
 """Orders to fills, with costs."""
 from __future__ import annotations
+import math
 import queue
 
 from .costs import (
@@ -49,6 +50,13 @@ class SimulatedExecutionHandler:
 
         daily_vol = data.trailing_volatility(event.symbol, self.window)
         move = self.impact_model.price_move(quantity, mid, adv, daily_vol)
+
+        # NaN statistics -- a thin, halted or delisted name -- must not
+        # poison cash: NaN > 0 is False, so the participation cap above
+        # already skipped, and the honest policy for "no ADV, no vol" is to
+        # charge no impact rather than propagate NaN into every later bar.
+        if not math.isfinite(move):
+            move = 0.0
 
         # Slippage rides in the PRICE. Impact rides in impact_cost. Portfolio.on_fill already debits FillEvent.total_cost,
         # so putting impact in both places charges it twice.

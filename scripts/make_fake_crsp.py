@@ -60,7 +60,8 @@ def fake_spy(yf_frame: pd.DataFrame, permno: int = 84398,
 
 
 def fake_universe(dates: pd.DatetimeIndex, n: int = 60, dead: int = 8,
-                  seed: int = 8) -> tuple[pd.DataFrame, pd.DataFrame]:
+                  seed: int = 8, svb: int = 0
+                  ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """A small universe where some names die inside the window.
 
     `dead` of them end early with a near-total loss and a delisting flag,
@@ -78,7 +79,10 @@ def fake_universe(dates: pd.DatetimeIndex, n: int = 60, dead: int = 8,
         end = len(dates) - 1
         if j < dead:
             end = int(len(dates) * (0.25 + 0.6 * j / dead))
-            rets.iloc[end, j] = -0.93
+            # `svb` of the deaths carry NO computable delisting return, the
+            # way ~3% of real CIZ delistings (SVB included) do: flag Y,
+            # dlyret NaN, price flat into the grave.
+            rets.iloc[end, j] = np.nan if j < svb else -0.93
         series = rets.iloc[:end + 1, j]
         close = 50.0 * (1 + series.fillna(0.0)).cumprod()
         flags = ["N"] * end + (["Y"] if j < dead else ["N"])

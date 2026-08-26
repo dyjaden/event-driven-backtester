@@ -95,6 +95,79 @@ def to_engine_frame(rows: pd.DataFrame, *, permno: int | None = None,
         .isin(["Y", "TRUE", "1"]).any())
     return validate_engine_frame(out)
 
+
+def to_panel(universe: pd.DataFrame, members: pd.DataFrame,
+             *, price_floor: float = 1e-8
+             ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Universe CIZ rows -> (close, volume) matrices for `PanelBarHandler`.
+
+    Only permnos that EVER appear in `members` (dsp500list_v2 spells) are
+    kept: roughly 1,000 columns instead of 6,638. Columns come out as
+    str(permno), because event symbols are strings.
+
+    Per column this is exactly the `to_engine_frame` treatment, vectorised:
+    the price is a total-return index rebuilt from `dlyret`, anchored at the
+    name's first raw close, and the volume is rescaled so that
+    close * volume equals dlyclose * dlyvol on every bar where both exist.
+    Rank momentum on `dlyclose` instead and every split reads as a crash.
+
+    NaN semantics differ from the single-symbol frame on purpose: NaN means
+    "no bar" (before listing, after death, a gap) and is allowed, because a
+    panel of lifespans cannot be rectangular. A missing dlyret on a bar the
+    name DID print -- its first day, or the ~3% of delistings with no
+    computable return -- counts as a zero-return day: a missing input, not a
+    missing bar. Columns with no data at all (members whose rows never pass
+    the common-stock screen) are dropped.
+    """
+    for col in REQUIRED_CIZ:
+        if col not in universe.columns:
+            raise ValueError(f"missing CIZ column: {col}")
+    if "permno" not in members.columns:
+        raise ValueError("members needs a permno column")
+
+    keep = universe["permno"].isin(set(members["permno"].unique()))
+    uni = universe.loc[keep, ["permno", "dlycaldt",
+                              "dlyret", "dlyclose", "dlyvol"]].copy()
+    if uni.empty:
+        raise ValueError("no universe rows match the membership list")
+    uni["dlycaldt"] = pd.to_datetime(uni["dlycaldt"])
+
+    # pivot (not pivot_table): duplicate (date, permno) rows are a data bug
+    # and must raise, not silently average.
+    ret = uni.pivot(index="dlycaldt", columns="permno",
+                    values="dlyret").sort_index()
+    raw_close = uni.pivot(index="dlycaldt", columns="permno",
+                          values="dlyclose").sort_index()
+    raw_vol = uni.pivot(index="dlycaldt", columns="permno",
+                        values="dlyvol").sort_index()
+    present = uni.assign(_one=1.0).pivot(index="dlycaldt", columns="permno",
+                                         values="_one").sort_index()
+
+    # A PRESENT bar with a missing return is a zero-return day; an absent
+    # bar stays NaN so the running product skips it.
+    ret = ret.where(present.isna(), ret.fillna(0.0))
+
+    growth = (1.0 + ret).cumprod()      # skipna: the product runs past gaps
+    anchor = raw_close.bfill().iloc[0]  # each name's first raw close
+    close = growth.mul(anchor, axis=1)
+
+    # -100% is a valid RETURN and an invalid PRICE (same floor as
+    # to_engine_frame, for the same log() reason).
+    close = close.clip(lower=price_floor)
+
+    factor = (close / raw_close).where(raw_close > 0)
+    volume = raw_vol / factor           # dollar volume invariant per bar
+
+    empty = close.columns[close.notna().sum() == 0]
+    close = close.drop(columns=empty)
+    volume = volume.drop(columns=empty)
+
+    close.columns = close.columns.map(str)
+    volume.columns = volume.columns.map(str)
+    close.index.name = "date"
+    volume.index.name = "date"
+    return close, volume
+
 def validate_engine_frame(frame: pd.DataFrame) -> pd.DataFrame:
     """Assert the contract `HistoricBarHandler` will not assert for you.
 
