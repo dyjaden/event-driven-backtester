@@ -154,6 +154,36 @@ Full table in `results/momentum_baseline.md`. Reproduce with
 `python scripts/momentum_report.py` — it prints its own sanity checks and
 refuses a clean exit if any fail.
 
+## Out of sample: the walk-forward
+
+The momentum numbers above are one pass over the full window with
+parameters fixed by convention. The walk-forward asks the next honest
+question: when parameters are chosen on past data — three-year training
+windows, selection by embargoed net Sharpe, twelve frozen configurations —
+what happens on the year the choice never saw?
+
+| Stitched 2018–2025, all costs, $10M | Total | CAGR | Sharpe | Max DD |
+|---|---|---|---|---|
+| Per-fold selection | 128.9% | 10.94% | 0.59 | -36.0% |
+| Fixed default (12-1, top 50), never selecting | 133.7% | 11.23% | 0.57 | -37.9% |
+| Point-in-time equal weight | 134.6% | 11.28% | 0.63 | -39.6% |
+
+**Selection was a wash: +0.02 stitched Sharpe versus never selecting at
+all**, with the mean Sharpe of chosen configs shrinking from 0.77 in train
+to 0.67 in test. Eight years of annual re-optimization over twelve
+configurations bought two basis points of Sharpe — which is what an honest
+small-grid search on a weak signal should show, and the trial count
+(12 × 8 = 96 training runs) is reported because it is part of the result.
+The deliberately included skip=0 trap — momentum without the skip-month,
+i.e. momentum minus reversal — was selected in three of eight years and
+punished hardest in 2022 (-0.23 test Sharpe against the default's +0.14):
+the multiple-testing problem demonstrated on this data rather than cited.
+
+Selection did hold one consistent opinion: seven of eight folds preferred
+the broadest book (top 100 rather than top 50), which is worth knowing and
+is not the same thing as being right out of sample. Full per-fold table in
+`results/walkforward.md`; reproduce with `python scripts/walkforward_report.py`.
+
 ## Costs are decided by turnover, not by the cost model
 
 The same commission and half-spread model applied to two strategies. The only
@@ -370,6 +400,10 @@ believed.
   momentum result is long-only for exactly that reason, and the
   literature's stronger long-short version is out of reach until shorting
   is modelled honestly.
+- **Walk-forward is one path through history.** CPCV is the known stronger
+  design and is future work, named rather than skipped. Twelve
+  configurations were tried across eight folds, and that count travels
+  with every out-of-sample number this repo reports.
 
 ## Tests
 
