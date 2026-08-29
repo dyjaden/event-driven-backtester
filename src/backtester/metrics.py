@@ -107,3 +107,63 @@ def summary(equity: pd.Series, risk_free: float = 0.0,
         "hit_rate": hit_rate(r),
         "n_periods": len(equity),
     }
+
+# ------------------------------------------------- multiple-testing honesty
+# Bailey & Lopez de Prado (2014), "The Deflated Sharpe Ratio". The best
+# Sharpe among N tried configurations is the maximum of N noisy numbers, and
+# the maximum of pure noise grows like sqrt(2 ln N). These two functions ask
+# the only honest question about a swept result: is the observed best bigger
+# than the best you would expect from N lottery tickets?
+#
+# Everything here works in PER-PERIOD (daily) Sharpe units, because the PSR
+# variance formula is stated per observation. Convert annualised Sharpes by
+# dividing by sqrt(periods_per_year) before calling.
+
+_EULER_GAMMA = 0.5772156649015329
+
+
+def expected_max_sharpe(n_trials: int, var_trials: float) -> float:
+    """E[max Sharpe] under the null that every true Sharpe is zero.
+
+    `var_trials` is the cross-trial variance of the (per-period) Sharpe
+    estimates -- the spread of the lottery tickets. N=1 returns 0.0: one
+    trial is not a search, so nothing is deflated.
+    """
+    from statistics import NormalDist
+    if n_trials < 1:
+        raise ValueError("n_trials must be at least 1")
+    if n_trials == 1 or var_trials <= 0:
+        return 0.0
+    z = NormalDist().inv_cdf
+    e = np.e
+    return float(np.sqrt(var_trials)
+                 * ((1 - _EULER_GAMMA) * z(1 - 1 / n_trials)
+                    + _EULER_GAMMA * z(1 - 1 / (n_trials * e))))
+
+
+def deflated_sharpe(returns: pd.Series, n_trials: int,
+                    var_trials: float) -> float:
+    """Probability that the observed Sharpe beats the expected max of N
+    pure-noise trials, adjusted for the return series' skew and fat tails.
+
+    ~0.5 means "exactly what the best of N lottery tickets looks like";
+    near 1.0 means the result survives its own trial count. Report it
+    BESIDE the raw Sharpe, never instead of it, and always with N.
+    """
+    from statistics import NormalDist
+    r = returns.dropna()
+    t = len(r)
+    if t < 3:
+        return np.nan
+    sd = r.std(ddof=1)
+    if not np.isfinite(sd) or sd < 1e-12:
+        return np.nan
+    sr = float(r.mean() / sd)                       # per-period Sharpe
+    sr0 = expected_max_sharpe(n_trials, var_trials)
+    g3 = float(r.skew())
+    g4 = float(r.kurt()) + 3.0                      # pandas kurt is excess
+    denom = 1.0 - g3 * sr + (g4 - 1.0) / 4.0 * sr ** 2
+    if denom <= 0:
+        return np.nan
+    stat = (sr - sr0) * np.sqrt(t - 1) / np.sqrt(denom)
+    return float(NormalDist().cdf(stat))

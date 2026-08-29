@@ -31,10 +31,13 @@ BAND = 0.001
 
 @dataclass(frozen=True)
 class Config:
-    """The momentum knobs that vary in the Day 10 grid."""
+    """The momentum knobs. Day 10 varied the first three; Day 11's sweep
+    adds the rebalance cadence, defaulted so every Day 10 call is
+    unchanged."""
     lookback: int
     skip: int
     top_n: int
+    rebalance: int = REBALANCE
 
 
 @dataclass(frozen=True)
@@ -100,8 +103,13 @@ def run_window(close: pd.DataFrame, volume: pd.DataFrame,
                mask: pd.DataFrame | None, config: Config,
                start: pd.Timestamp, end: pd.Timestamp, *,
                capital: float = 10_000_000.0,
-               execution_factory=loaded_execution) -> pd.Series:
+               execution_factory=loaded_execution,
+               return_portfolio: bool = False):
     """The strategy over [start, end], returned rebased to 1.0.
+
+    With return_portfolio=True, returns (curve, portfolio) so callers that
+    need fills -- turnover, costs paid -- can have them without a second
+    run. The curve is identical either way.
 
     The run actually begins `lookback` bars EARLIER, so formations exist
     from the first bar of the window and you walk in with a live book --
@@ -124,13 +132,15 @@ def run_window(close: pd.DataFrame, volume: pd.DataFrame,
                    min_trade_fraction=BAND)
     strat = CrossSectionalMomentumStrategy(
         data, membership=m, top_n=config.top_n,
-        lookback=config.lookback, skip=config.skip, rebalance=REBALANCE)
+        lookback=config.lookback, skip=config.skip,
+        rebalance=config.rebalance)
     Backtest(data, strat, pf, execution_factory()).run()
 
     curve = pf.equity_curve().loc[start:end]
     if curve.empty:
         raise ValueError(f"no bars in [{start}, {end}]")
-    return curve / curve.iloc[0]
+    curve = curve / curve.iloc[0]
+    return (curve, pf) if return_portfolio else curve
 
 
 def embargoed_sharpe(curve: pd.Series, embargo_bars: int) -> float:
