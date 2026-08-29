@@ -23,7 +23,11 @@ import argparse
 import time
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")                    # headless; PNGs, never windows
+import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.colors import TwoSlopeNorm
 
 from backtester.costs import (HalfSpreadSlippage, PerShareCommission,
                               SquareRootImpact, ZeroImpact, ZeroSlippage)
@@ -64,8 +68,12 @@ def execution_with(spread_bps: float = 1.0, impact_y: float = 1.0):
 
 
 def _load_cache(path: Path) -> pd.DataFrame:
+    """The append-only log, deduplicated on read: the same key measured
+    twice is the same measurement (the engine is deterministic), so the
+    first occurrence wins and the duplicate is inert."""
     if path.exists():
-        return pd.read_csv(path)
+        return pd.read_csv(path).drop_duplicates(subset=KEY, keep="first",
+                                                 ignore_index=True)
     return pd.DataFrame(columns=COLS)
 
 
@@ -83,12 +91,16 @@ def sweep(close, volume, mask, configs, *, start, end, tag,
     Rows come back in `configs` order whether cached or fresh. Costs and
     turnover are measured over the whole run, which for full-window sweeps
     (start = first bar) is exactly the measured window.
+
+    Each row is APPENDED TO DISK the moment its backtest completes, not when
+    the batch ends -- an interrupted sweep loses nothing, and the registry
+    records every backtest that actually ran, which is the only kind of
+    registry the deflated Sharpe can trust.
     """
     cache = _load_cache(cache_path)
     have = {tuple(r) for r in cache[KEY].itertuples(index=False)} if len(cache) else set()
 
     ran = 0
-    new_rows = []
     for config in configs:
         key = _key_of(tag, config, start, end, capital)
         if key in have:
@@ -102,24 +114,25 @@ def sweep(close, volume, mask, configs, *, start, end, tag,
         eq = pf.equity_curve()
         years = len(eq) / 252
         traded = sum(abs(f.gross_value) for f in pf.fills)
-        new_rows.append(dict(zip(KEY, key)) | {
+        row = dict(zip(KEY, key)) | {
             "total": m["total_return"], "cagr": m["cagr"],
             "sharpe": m["sharpe"], "max_drawdown": m["max_drawdown"],
             "turnover": traded / eq.mean() / years,
             "commission": sum(f.commission for f in pf.fills),
             "impact": sum(f.impact_cost for f in pf.fills),
             "ran_at": pd.Timestamp.now("UTC").isoformat(timespec="seconds"),
-        })
+        }
+        row_df = pd.DataFrame([row], columns=COLS)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        row_df.to_csv(cache_path, mode="a",
+                      header=not cache_path.exists(), index=False)
+        cache = pd.concat([cache, row_df], ignore_index=True)
+        have.add(key)            # a config listed twice in one call runs once
         ran += 1
         print(f"    ran {tag} L{config.lookback}/S{config.skip}"
               f"/N{config.top_n}/R{config.rebalance} @ ${capital:,.0f}: "
               f"sharpe {m['sharpe']:.2f}  ({time.time() - t0:.0f}s)",
               flush=True)
-
-    if new_rows:
-        cache = pd.concat([cache, pd.DataFrame(new_rows)], ignore_index=True)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        cache.to_csv(cache_path, index=False)
 
     keys = [_key_of(tag, c, start, end, capital) for c in configs]
     idx = cache.set_index(KEY)
@@ -138,6 +151,60 @@ def registry_trial_count(cache_path: Path = CACHE,
     if len(cache) == 0:
         return walkforward_trials
     return int(cache[KEY].drop_duplicates().shape[0]) + walkforward_trials
+
+
+def draw_heatmap(surface: pd.DataFrame,
+                 png: Path = Path("results/sensitivity_heatmap.png"),
+                 csv: Path = Path("results/sensitivity_heatmap.csv")) -> None:
+    """Lookback x rebalance -> net Sharpe. Every cell carries its number (a
+    color gradient without printed values is decoration) and the pivot table
+    is saved beside the PNG. One hue when the surface is one-signed; a
+    red/blue split around zero when it is not -- polarity is information.
+    White figure background on purpose: GitHub dark mode renders PNGs as-is.
+    """
+    grid = (surface.pivot(index="lookback", columns="rebalance",
+                          values="sharpe")
+            .sort_index().sort_index(axis=1).astype(float))
+    csv.parent.mkdir(parents=True, exist_ok=True)
+    grid.round(4).to_csv(csv)
+
+    lo, hi = float(grid.min().min()), float(grid.max().max())
+    fig, ax = plt.subplots(figsize=(7.2, 5.2), dpi=150)
+    fig.patch.set_facecolor("white")
+    if lo < 0 < hi:
+        span = max(abs(lo), abs(hi))
+        norm = TwoSlopeNorm(vmin=-span, vcenter=0.0, vmax=span)
+        im = ax.imshow(grid.values, cmap="RdBu", norm=norm, aspect="auto")
+    else:
+        im = ax.imshow(grid.values, cmap="Blues", vmin=lo, vmax=hi,
+                       aspect="auto")
+
+    for i, lb in enumerate(grid.index):
+        for j, rb in enumerate(grid.columns):
+            v = grid.iloc[i, j]
+            r, g, b, _ = im.cmap(im.norm(v))
+            ink = "white" if (0.299 * r + 0.587 * g + 0.114 * b) < 0.5 else "#1a1a1a"
+            ax.text(j, i, f"{v:.2f}", ha="center", va="center",
+                    color=ink, fontsize=13, fontweight="bold")
+
+    ax.set_xticks(range(len(grid.columns)),
+                  [f"{c}" for c in grid.columns], fontsize=11)
+    ax.set_yticks(range(len(grid.index)),
+                  [f"{i}" for i in grid.index], fontsize=11)
+    ax.set_xlabel("rebalance every N bars", fontsize=11)
+    ax.set_ylabel("lookback (bars)", fontsize=11)
+    ax.set_title("Net Sharpe at $10M -- lookback x rebalance\n"
+                 "(top 50, skip 21, 2015-2025, all costs on)",
+                 fontsize=12, pad=12)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    cb = fig.colorbar(im, ax=ax, shrink=0.85)
+    cb.set_label("net Sharpe", fontsize=10)
+    cb.outline.set_visible(False)
+    fig.tight_layout()
+    fig.savefig(png, facecolor="white")
+    plt.close(fig)
+    print(f"  wrote {png} and {csv}")
 
 
 def main() -> None:
@@ -161,7 +228,28 @@ def main() -> None:
           f"{len(df) - ran} from cache")
     print(f"  registry trial count (incl. walk-forward's 12): "
           f"{registry_trial_count()}")
-    # Steps 2-4 read this cache and draw the pictures.
+
+    # ---------------------------------------- Step 2: the surface, drawn
+    surface_df = df.iloc[:len(SURFACE)]
+    breadth_df = df.iloc[len(SURFACE):]
+    draw_heatmap(surface_df)
+
+    print("\nBREADTH  (L252/S21/R21, $10M, all costs on)")
+    print(f"  {'top_n':>6} {'sharpe':>7} {'cagr':>7} {'maxDD':>8} "
+          f"{'turnover':>9}")
+    for _, r in breadth_df.iterrows():
+        print(f"  {int(r['top_n']):>6} {r['sharpe']:>7.2f} {r['cagr']:>7.2%} "
+              f"{r['max_drawdown']:>8.2%} {r['turnover']:>8.2f}x")
+
+    by_n = breadth_df.set_index("top_n")["sharpe"]
+    if by_n[100] > by_n[50]:
+        verdict = ("top-100 beats top-50 on the full window too: the folds "
+                   "were seeing real diversification of a weak signal.")
+    else:
+        verdict = ("top-100 does NOT beat top-50 on the full window: the "
+                   "folds' preference was fit to three-year noise.")
+    print(f"  BREADTH VERDICT: {verdict}")
+    # Steps 3-4 read the same cache: capacity, cost slices, the DSR.
 
 
 if __name__ == "__main__":

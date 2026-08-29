@@ -40,16 +40,21 @@ def leadership_flip_panel():
 # -------------------------------------------------------------- the cache
 def test_sweep_caches_and_a_second_pass_runs_nothing(tmp_path):
     """Round-trip: every config runs once, lands in the CSV, and the same
-    request again is served entirely from disk with identical numbers."""
+    request again is served entirely from disk with identical numbers. The
+    request deliberately lists one config twice -- SURFACE and BREADTH
+    genuinely overlap on a cell, and the overlap must run once, not twice
+    (the bug that crashed the first real sweep of Day 11)."""
     close, volume = leadership_flip_panel()
     cache = tmp_path / "cache.csv"
-    configs = (Config(21, 0, 1, rebalance=5), Config(21, 0, 1, rebalance=63))
+    configs = (Config(21, 0, 1, rebalance=5), Config(21, 0, 1, rebalance=63),
+               Config(21, 0, 1, rebalance=5))         # the duplicate
 
     df1, ran1 = sweep(close, volume, None, configs,
                       start=IDX[30], end=IDX[-1], tag="t", capital=1e6,
                       execution_factory=NaiveExecutionHandler,
                       cache_path=cache)
-    assert ran1 == 2 and len(df1) == 2
+    assert ran1 == 2                                  # duplicate ran once
+    assert len(df1) == 3                              # but three rows back
     assert cache.exists()
 
     df2, ran2 = sweep(close, volume, None, configs,
@@ -58,9 +63,9 @@ def test_sweep_caches_and_a_second_pass_runs_nothing(tmp_path):
                       cache_path=cache)
     assert ran2 == 0                                  # zero backtests run
     assert np.allclose(df1["sharpe"], df2["sharpe"])
-    assert list(df2["rebalance"]) == [5, 63]          # rows in config order
+    assert list(df2["rebalance"]) == [5, 63, 5]       # rows in config order
 
-    # rebalance is part of the key: two rows, not one overwritten
+    # rebalance is part of the key: two distinct rows on disk, no third
     on_disk = pd.read_csv(cache)
     assert len(on_disk) == 2
     assert sorted(on_disk["rebalance"]) == [5, 63]
