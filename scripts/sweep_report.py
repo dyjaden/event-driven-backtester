@@ -26,15 +26,17 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")                    # headless; PNGs, never windows
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.colors import TwoSlopeNorm
 
 from backtester.costs import (HalfSpreadSlippage, PerShareCommission,
                               SquareRootImpact, ZeroImpact, ZeroSlippage)
 from backtester.crsp import membership_mask, to_panel
-from backtester.execution import SimulatedExecutionHandler
+from backtester.execution import NaiveExecutionHandler, SimulatedExecutionHandler
 from backtester.metrics import deflated_sharpe, expected_max_sharpe, summary
-from backtester.walkforward import Config, loaded_execution, run_window
+from backtester.walkforward import (DEFAULT_CONFIG, Config, loaded_execution,
+                                    run_window)
 
 CACHE = Path("results/sweep_cache.csv")
 CAPITAL = 10_000_000.0
@@ -207,6 +209,69 @@ def draw_heatmap(surface: pd.DataFrame,
     print(f"  wrote {png} and {csv}")
 
 
+def draw_capacity(ladder: pd.DataFrame,
+                  png: Path = Path("results/capacity_curve.png"),
+                  csv: Path = Path("results/capacity_curve.csv")
+                  ) -> tuple[float, float]:
+    """Cost drag (gross CAGR minus net CAGR, pp/yr) against AUM, log-x.
+
+    The drag is measured RUNG BY RUNG -- the gross arm reruns at every
+    capital, because share rounding at $100k is not the rounding at $1B and
+    the baseline must carry the same granularity as the run it absolves.
+    This strategy has no edge over its benchmark to kill, so this curve is a
+    property of the implementation, not of an alpha: the question is where
+    the cost curve steepens, not where profit dies. Returns the log-
+    interpolated AUMs where drag crosses 1 and 2 pp/yr (nan if never).
+    """
+    t = ladder.sort_values("capital").reset_index(drop=True)
+    csv.parent.mkdir(parents=True, exist_ok=True)
+    t.round(6).to_csv(csv, index=False)
+
+    def crossing(level: float) -> float:
+        x, y = np.log10(t["capital"].values), t["drag_pp"].values
+        for i in range(len(y) - 1):
+            lo, hi = y[i] - level, y[i + 1] - level
+            if lo * hi <= 0 and y[i] != y[i + 1]:
+                f = (level - y[i]) / (y[i + 1] - y[i])
+                return float(10 ** (x[i] + f * (x[i + 1] - x[i])))
+        return float("nan")
+
+    aum1, aum2 = crossing(1.0), crossing(2.0)
+
+    fig, ax = plt.subplots(figsize=(7.2, 4.8), dpi=150)
+    fig.patch.set_facecolor("white")
+    ax.set_xscale("log")
+    ax.plot(t["capital"], t["drag_pp"], color="#2166ac", lw=2,
+            marker="o", ms=7, zorder=3)
+    for _, r in t.iterrows():
+        ax.annotate(f"{r['drag_pp']:.2f}", (r["capital"], r["drag_pp"]),
+                    textcoords="offset points", xytext=(0, 9),
+                    ha="center", fontsize=9.5, color="#1a1a1a")
+    for level, aum in ((1.0, aum1), (2.0, aum2)):
+        ax.axhline(level, color="#999999", lw=1, ls="--", zorder=1)
+        if np.isfinite(aum):
+            ax.axvline(aum, color="#999999", lw=1, ls=":", zorder=1)
+            ax.annotate(f"{level:.0f} pp/yr at ${aum / 1e6:,.0f}M",
+                        (aum, level), textcoords="offset points",
+                        xytext=(6, -14), fontsize=9.5, color="#444444")
+    ax.set_xticks([1e5, 1e6, 1e7, 1e8, 1e9],
+                  ["$100k", "$1M", "$10M", "$100M", "$1B"], fontsize=10)
+    ax.set_xlabel("AUM (log scale)", fontsize=11)
+    ax.set_ylabel("cost drag (pp of CAGR per year)", fontsize=11)
+    ax.set_title("Where costs eat the implementation -- drag vs AUM\n"
+                 "(12-1 momentum, top 50, monthly, 2015-2025, "
+                 "gross minus net CAGR)", fontsize=12, pad=12)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.spines[["left", "bottom"]].set_color("#cccccc")
+    ax.tick_params(colors="#444444")
+    ax.grid(axis="y", color="#eeeeee", lw=0.8, zorder=0)
+    fig.tight_layout()
+    fig.savefig(png, facecolor="white")
+    plt.close(fig)
+    print(f"  wrote {png} and {csv}")
+    return aum1, aum2
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data")
@@ -249,7 +314,50 @@ def main() -> None:
         verdict = ("top-100 does NOT beat top-50 on the full window: the "
                    "folds' preference was fit to three-year noise.")
     print(f"  BREADTH VERDICT: {verdict}")
-    # Steps 3-4 read the same cache: capacity, cost slices, the DSR.
+
+    # -------------------------------------------- Step 3: the AUM ladder
+    print(f"\nCAPACITY  (default config, gross rerun at every rung)")
+    rungs = []
+    for cap in AUM_LADDER:
+        n, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
+                     start=start, end=end, tag="net", capital=cap)
+        g, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
+                     start=start, end=end, tag="gross", capital=cap,
+                     execution_factory=NaiveExecutionHandler)
+        rungs.append({
+            "capital": cap,
+            "gross_cagr": float(g["cagr"].iloc[0]),
+            "net_cagr": float(n["cagr"].iloc[0]),
+            "drag_pp": (float(g["cagr"].iloc[0])
+                        - float(n["cagr"].iloc[0])) * 100,
+            "net_sharpe": float(n["sharpe"].iloc[0]),
+            "net_turnover": float(n["turnover"].iloc[0]),
+            "gross_turnover": float(g["turnover"].iloc[0]),
+            "commission": float(n["commission"].iloc[0]),
+            "impact": float(n["impact"].iloc[0]),
+        })
+    ladder = pd.DataFrame(rungs)
+    aum1, aum2 = draw_capacity(ladder)
+
+    print(f"  {'AUM':>9} {'gross':>7} {'net':>7} {'drag':>8} {'sharpe':>7} "
+          f"{'turnover':>9}")
+    for _, r in ladder.iterrows():
+        label = f"${r['capital'] / 1e6:,.1f}M"
+        print(f"  {label:>9} "
+              f"{r['gross_cagr']:>7.2%} {r['net_cagr']:>7.2%} "
+              f"{r['drag_pp']:>6.2f}pp {r['net_sharpe']:>7.2f} "
+              f"{r['net_turnover']:>8.2f}x")
+    for level, aum in ((1.0, aum1), (2.0, aum2)):
+        where = (f"${aum / 1e6:,.0f}M" if np.isfinite(aum)
+                 else "never inside the ladder")
+        print(f"  drag crosses {level:.0f} pp/yr at: {where}")
+    tw = ladder.set_index("capital")
+    shrink = 1 - tw.loc[1e9, "net_turnover"] / tw.loc[1e9, "gross_turnover"]
+    if shrink > 0.05:
+        print(f"  at $1B the capped book completes {1 - shrink:.0%} of the "
+              f"turnover the uncapped one wants -- the Day 7 participation "
+              f"wall, reappearing at the illiquid tail")
+    # Step 4 reads the same cache: cost slices and the DSR.
 
 
 if __name__ == "__main__":
