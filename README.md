@@ -78,6 +78,12 @@ registered trials.**
 Data migrated from Yahoo Finance to **CRSP CIZ daily** (PERMNO-keyed,
 point-in-time universe, delisting returns) on 24 August 2026.
 
+Version history: **`v0.1`** (18 Aug 2026) single-symbol engine with honest
+costs, 59 tests → **`v0.5`** (26 Aug) multi-symbol, CRSP point-in-time,
+momentum measured, 105 tests → **`v1.0`** (31 Aug) walk-forward validated,
+robustness screened, trial registry, 117 tests, reproducible from a clean
+clone with no data subscription.
+
 Two published numbers have been revised after defects were found in the input
 data, not in the model: the capacity figures on 21 August 2026, and the
 survivorship measurement below, which nearly shipped without its delistings on
