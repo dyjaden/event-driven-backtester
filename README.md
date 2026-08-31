@@ -8,6 +8,27 @@ Look-ahead bias, survivorship bias, transaction costs and market impact are
 modelled explicitly rather than assumed away, and every result states the
 capital it was produced at.
 
+## Results (measured, not claimed)
+
+| What | Number | Window / trials |
+|---|---|---|
+| [Survivorship + index-addition bias](#what-survivorship-bias-was-worth) | **5.48 pp/yr** | 2015–2025, point-in-time S&P 500 vs today's list, zero costs |
+| [12-1 momentum vs PIT equal weight](#the-first-strategy-measured-honestly) | **−0.87 pp/yr** net at $10M (−1.48 at $100k) | 2015–2025, all costs on → [`momentum_baseline.md`](results/momentum_baseline.md) |
+| [Walk-forward selection vs never selecting](#out-of-sample-the-walk-forward) | **+0.02 Sharpe — a wash** (0.77 → 0.67 IS→OOS) | stitched 2018–2025, 12 × 8 = 96 training runs → [`walkforward.md`](results/walkforward.md) |
+| [Capacity of the implementation](#robustness-is-any-of-it-real) | **1 pp/yr cost drag at ≈$26M**, 2 pp/yr at ≈$211M | AUM ladder $100k–$1B, gross baseline rerun per rung → [`robustness.md`](results/robustness.md) |
+| [Deflated Sharpe of the best sweep cell](#robustness-is-any-of-it-real) | **0.75 raw → 0.96 deflated** | N = 47 registered trials; the null is zero Sharpe, which a long-only 2015–2025 book clears largely on beta (benchmark 0.63) → [`robustness.md`](results/robustness.md) |
+
+![Net Sharpe over lookback x rebalance](results/sensitivity_heatmap.png)
+
+![Cost drag vs AUM](results/capacity_curve.png)
+
+Every number above travels with its window and its trial count, because a
+number without them is a claim rather than a measurement. The engine's job
+was never to find an edge — it was to measure honestly, including when the
+honest answer is a loss.
+
+## How it works
+
 ```
 DataHandler --MarketEvent--> Strategy --SignalEvent--> Portfolio
      ^                                                    |
@@ -31,7 +52,10 @@ Engine, portfolio accounting, pluggable position sizing, commission and
 half-spread costs, square-root market impact and a participation cap.
 **Multi-symbol as of `v0.5`** (26 August 2026): a panel handler prices a
 cross-sectional book, with an explicit exit policy for names that delist
-mid-hold, and the first full costed strategy has run through it. 105 tests.
+mid-hold. Walk-forward validation shipped 28 August; the robustness
+screens — sensitivity surface, capacity, cost sensitivity, and the
+deflated Sharpe with its trial registry — on 30 August. **117 tests; 47
+registered trials.**
 
 Data migrated from Yahoo Finance to **CRSP CIZ daily** (PERMNO-keyed,
 point-in-time universe, delisting returns) on 24 August 2026.
@@ -46,7 +70,8 @@ full volume: [The first strategy, measured honestly](#the-first-strategy-measure
 
 ## Headline result
 
-Buy and hold, SPY, **$100,000**, zero costs. This is the known-answer baseline:
+Buy and hold, SPY, **$100,000**, zero costs, 2015–2025 (2,766 bars). This
+is the known-answer baseline:
 with no costs, a buy-and-hold backtest must reproduce the asset's own return.
 If it does not, the engine is wrong, not the strategy.
 
@@ -206,11 +231,13 @@ reproduce with `python scripts/sweep_report.py`.
   book completes only 86% of the turnover it wants: Day 7's wall,
   reappearing at the illiquid tail. The curve is J-shaped: commission
   minimums eat the $100k account from the other end.
-- **Cost sensitivity** (`cost_sensitivity.png`): the pre-committed
+- **Cost sensitivity**: the pre-committed
   expectation — that the spread assumption dominates — was wrong, and the
   data gets the last word. At ~7×/yr turnover, ten basis points of assumed
   half-spread cost 0.02 Sharpe: a cost assumption matters exactly as fast
   as you trade against it.
+
+  ![Net Sharpe vs cost assumptions](results/cost_sensitivity.png)
 - **The deflated Sharpe of the best cell**: raw 0.75 (L189, quarterly);
   after deflating for the project's **47 registered trials**, the
   probability it beats the expected maximum of that many noise trials is
@@ -451,7 +478,7 @@ believed.
 python -m pytest -q
 ```
 
-105 tests. The ones worth reading are the invariants rather than the happy
+117 tests. The ones worth reading are the invariants rather than the happy
 paths: that a zero-cost fill cannot change equity, that impact scales as the
 square root of size, that a cost is never charged twice, that a bar-zero trade
 pays no impact, which pins the warm-up boundary so that "fixing" it with a
@@ -461,9 +488,13 @@ either data vendor, that a two-priced book is worth the sum of its positions
 rather than one close multiplied across everything (the multi-symbol
 refactor's known answer, and a bug a panel of identical prices cannot see),
 that a holding which delists mid-month exits at its last known price without
-a NaN ever reaching the equity curve, and that 12-1 momentum refuses a name
+a NaN ever reaching the equity curve, that 12-1 momentum refuses a name
 whose entire run-up sits inside the skip month — the same panel run with
-skip=0 buys it, which is the off-by-a-month the test exists to catch.
+skip=0 buys it, which is the off-by-a-month the test exists to catch — that
+a poisoned test year cannot change what walk-forward selection picks, and
+that the sweep cache round-trips with a deliberately duplicated config,
+because the real grids genuinely overlap and the trial registry must count
+a look exactly once.
 
 The one that matters most is `test_a_frame_already_on_one_basis_is_unchanged`.
 A repair that alters correct data is not a repair, and that is usually the test
