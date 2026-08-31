@@ -184,6 +184,42 @@ the broadest book (top 100 rather than top 50), which is worth knowing and
 is not the same thing as being right out of sample. Full per-fold table in
 `results/walkforward.md`; reproduce with `python scripts/walkforward_report.py`.
 
+## Robustness: is any of it real?
+
+Four screens over the frozen Day 11 grids, every backtest recorded in
+`results/sweep_cache.csv` — the cache that doubles as the **trial
+registry**, because a deflated Sharpe is only as honest as the trial count
+behind it. Full tables and figures in `results/robustness.md`;
+reproduce with `python scripts/sweep_report.py`.
+
+- **Sensitivity** (`sensitivity_heatmap.png`): net Sharpe over lookback ×
+  rebalance is a smooth ridge, 0.38–0.75. Weekly rebalancing is eaten
+  alive by its own turnover (21.5×/yr against 5× at quarterly) in every
+  row, and the canonical 12-1 formation is the *weakest* lookback on this
+  window — noted and deliberately not promoted.
+- **Breadth**: top-100 beats top-50 on the full window (0.67 vs 0.58
+  net Sharpe), confirming what seven of eight walk-forward folds kept
+  choosing — real diversification of a weak signal, not fold noise.
+- **Capacity** (`capacity_curve.png`): cost drag crosses 1 pp/yr at
+  ≈ $26M and 2 pp/yr at ≈ $211M, climbing the square-root way with no
+  wall inside the ladder — but at $1B the participation cap binds and the
+  book completes only 86% of the turnover it wants: Day 7's wall,
+  reappearing at the illiquid tail. The curve is J-shaped: commission
+  minimums eat the $100k account from the other end.
+- **Cost sensitivity** (`cost_sensitivity.png`): the pre-committed
+  expectation — that the spread assumption dominates — was wrong, and the
+  data gets the last word. At ~7×/yr turnover, ten basis points of assumed
+  half-spread cost 0.02 Sharpe: a cost assumption matters exactly as fast
+  as you trade against it.
+- **The deflated Sharpe of the best cell**: raw 0.75 (L189, quarterly);
+  after deflating for the project's **47 registered trials**, the
+  probability it beats the expected maximum of that many noise trials is
+  **0.96** — and the same at double the count, since E[max] grows only
+  like √(ln N). The honest caveat travels with it: DSR tests the
+  zero-Sharpe null, and a long-only book over 2015–2025 clears that bar
+  largely on market beta (the benchmark itself earned 0.63). The 0.75 is
+  not a selection artifact; it is also not an edge over the benchmark.
+
 ## Costs are decided by turnover, not by the cost model
 
 The same commission and half-spread model applied to two strategies. The only
@@ -404,6 +440,10 @@ believed.
   design and is future work, named rather than skipped. Twelve
   configurations were tried across eight folds, and that count travels
   with every out-of-sample number this repo reports.
+- **Every surface and screen in this repo shares one 2015–2025 window.**
+  Robustness across knobs is not robustness across regimes; a parameter
+  that is stable inside one decade has been tested against that decade
+  and nothing else.
 
 ## Tests
 

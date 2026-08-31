@@ -272,6 +272,48 @@ def draw_capacity(ladder: pd.DataFrame,
     return aum1, aum2
 
 
+def draw_cost_sensitivity(spread: pd.DataFrame, impact: pd.DataFrame,
+                          png: Path = Path("results/cost_sensitivity.png"),
+                          csv: Path = Path("results/cost_sensitivity.csv")
+                          ) -> None:
+    """Net Sharpe against the two cost assumptions nobody audits: the
+    half-spread (bp) and the impact coefficient Y. Side-by-side panels on a
+    shared y-axis -- the x units differ, and a twin-axis chart is how
+    readers get lied to."""
+    both = pd.concat([spread.assign(slice="spread_bp"),
+                      impact.assign(slice="impact_y")], ignore_index=True)
+    csv.parent.mkdir(parents=True, exist_ok=True)
+    both.round(6).to_csv(csv, index=False)
+
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.2), dpi=150,
+                             sharey=True)
+    fig.patch.set_facecolor("white")
+    panels = ((axes[0], spread, "assumed half-spread (bp)",
+               "spread, at impact Y=1.0"),
+              (axes[1], impact, "impact coefficient Y",
+               "impact, at spread 1 bp"))
+    for ax, t, xlabel, sub in panels:
+        ax.plot(t["x"], t["sharpe"], color="#2166ac", lw=2,
+                marker="o", ms=7, zorder=3)
+        for _, r in t.iterrows():
+            ax.annotate(f"{r['sharpe']:.2f}", (r["x"], r["sharpe"]),
+                        textcoords="offset points", xytext=(0, 9),
+                        ha="center", fontsize=9.5, color="#1a1a1a")
+        ax.set_xlabel(xlabel, fontsize=11)
+        ax.set_title(sub, fontsize=11)
+        ax.spines[["top", "right"]].set_visible(False)
+        ax.spines[["left", "bottom"]].set_color("#cccccc")
+        ax.tick_params(colors="#444444")
+        ax.grid(axis="y", color="#eeeeee", lw=0.8, zorder=0)
+    axes[0].set_ylabel("net Sharpe", fontsize=11)
+    fig.suptitle("Net Sharpe vs the cost assumptions "
+                 "(default config, $10M, 2015-2025)", fontsize=12)
+    fig.tight_layout()
+    fig.savefig(png, facecolor="white")
+    plt.close(fig)
+    print(f"  wrote {png} and {csv}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data")
@@ -357,7 +399,85 @@ def main() -> None:
         print(f"  at $1B the capped book completes {1 - shrink:.0%} of the "
               f"turnover the uncapped one wants -- the Day 7 participation "
               f"wall, reappearing at the illiquid tail")
-    # Step 4 reads the same cache: cost slices and the DSR.
+
+    # ------------------------------------------ Step 4a: the cost slices
+    print(f"\nCOST SENSITIVITY  (default config, $10M)")
+
+    def slice_row(x, res):
+        return {"x": x, "sharpe": float(res["sharpe"].iloc[0]),
+                "cagr": float(res["cagr"].iloc[0]),
+                "commission": float(res["commission"].iloc[0]),
+                "impact": float(res["impact"].iloc[0])}
+
+    spread_rows, impact_rows = [], []
+    for bp in SPREADS_BP:
+        if bp == 1.0:                      # the loaded arm IS 1 bp / Y=1.0
+            r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
+                         start=start, end=end, tag="net")
+        else:
+            r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
+                         start=start, end=end, tag=f"spread{bp:g}bp",
+                         execution_factory=execution_with(spread_bps=bp,
+                                                          impact_y=1.0))
+        spread_rows.append(slice_row(bp, r))
+    for y in IMPACT_YS:
+        if y == 1.0:
+            r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
+                         start=start, end=end, tag="net")
+        else:
+            r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
+                         start=start, end=end, tag=f"impactY{y:g}",
+                         execution_factory=execution_with(spread_bps=1.0,
+                                                          impact_y=y))
+        impact_rows.append(slice_row(y, r))
+    spread_t = pd.DataFrame(spread_rows)
+    impact_t = pd.DataFrame(impact_rows)
+    draw_cost_sensitivity(spread_t, impact_t)
+
+    slope = ((spread_t["sharpe"].iloc[-1] - spread_t["sharpe"].iloc[0])
+             / (spread_t["x"].iloc[-1] - spread_t["x"].iloc[0]))
+    print(f"  spread slice : " + "  ".join(
+        f"{r['x']:g}bp {r['sharpe']:.2f}" for _, r in spread_t.iterrows()))
+    print(f"  impact slice : " + "  ".join(
+        f"Y={r['x']:g} {r['sharpe']:.2f}" for _, r in impact_t.iterrows()))
+    print(f"  SLOPE: each basis point of assumed half-spread costs "
+          f"~{abs(slope):.3f} Sharpe here. The expectation was that this "
+          f"assumption dominates; at ~7x/yr turnover it does not -- the "
+          f"sensitivity lives in the turnover knob (the rebalance=5 "
+          f"column), and a spread assumption only matters as fast as you "
+          f"trade against it.")
+
+    # --------------------- Step 4b: the deflated Sharpe of the best cell
+    # The discovery set whose spread feeds the null: the $10M net
+    # strategy variants (surface + breadth). N is larger -- every look the
+    # registry knows about, plus the walk-forward's twelve.
+    strat = df.drop_duplicates(subset=KEY)
+    per_period = strat["sharpe"] / np.sqrt(252)
+    var_trials = float(per_period.var(ddof=1))
+    best = strat.loc[strat["sharpe"].idxmax()]
+    best_cfg = Config(int(best["lookback"]), int(best["skip"]),
+                      int(best["top_n"]), int(best["rebalance"]))
+    n = registry_trial_count()
+    curve = run_window(close, volume, mask, best_cfg, start, end,
+                       capital=CAPITAL)      # re-measure for daily returns
+    rets = curve.pct_change().dropna()
+    dsr_n = deflated_sharpe(rets, n, var_trials)
+    dsr_2n = deflated_sharpe(rets, 2 * n, var_trials)
+    sr0_ann = expected_max_sharpe(n, var_trials) * np.sqrt(252)
+
+    print(f"\nDEFLATED SHARPE of the best cell "
+          f"(L{best_cfg.lookback}/S{best_cfg.skip}/N{best_cfg.top_n}"
+          f"/R{best_cfg.rebalance})")
+    print(f"  raw Sharpe {best['sharpe']:.2f}   trials N={n} "
+          f"(registry {n - 12} + walk-forward 12)   "
+          f"cross-trial spread from {len(strat)} strategy variants")
+    print(f"  expected max Sharpe of N pure-noise trials: {sr0_ann:.2f} "
+          f"(annualised)")
+    print(f"  DSR at N:  {dsr_n:.2f}     DSR at 2N: {dsr_2n:.2f}")
+    print(f"  SENTENCE: the best cell's Sharpe is {best['sharpe']:.2f}; "
+          f"after deflating for {n} trials, the evidence it is real "
+          f"is {dsr_n:.2f} (and {dsr_2n:.2f} if the true trial count "
+          f"were double).")
 
 
 if __name__ == "__main__":
