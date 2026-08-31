@@ -34,6 +34,7 @@ class HistoricBarHandler:
 
     @property
     def current_time(self):
+        """Timestamp of the current bar; None before the first update_bars."""
         if self._i < 0:
             return None
         return self.frame.index[self._i]
@@ -54,6 +55,7 @@ class HistoricBarHandler:
         return self.frame.iloc[start:self._i + 1]
 
     def current_price(self, symbol: str | None = None, field: str = "close") -> float:
+        """The current bar's `field` for this handler's one symbol."""
         if symbol is not None and symbol != self.symbol:
             raise KeyError(f"this handler serves {self.symbol!r}, not {symbol!r}")
         return float(self.frame.iloc[self._i][field])
@@ -131,6 +133,7 @@ class PanelBarHandler:
     # ------------------------------------------------------------- time
     @property
     def current_time(self):
+        """Timestamp of the current bar; None before the run starts."""
         if self._i < 0:
             return None
         return self._close.index[self._i]
@@ -168,6 +171,7 @@ class PanelBarHandler:
         return list(row.index[row.notna()])
 
     def has_bar(self, symbol) -> bool:
+        """True when this name printed a real bar on the current date."""
         self._require_started()
         return bool(pd.notna(self._close.iloc[self._i, self._col(symbol)]))
 
@@ -188,6 +192,8 @@ class PanelBarHandler:
     # ------------------------------------------------------------ pricing
     def current_price(self, symbol: str | None = None,
                       field: str = "close") -> float:
+        """The mark for a name: today's close, else the LAST KNOWN close
+        (the corpse policy). Raises for a name with no history yet."""
         if field != "close":
             raise ValueError("a panel carries close and volume only")
         self._require_started()

@@ -95,7 +95,6 @@ def main() -> None:
     mask = (membership_mask(close.index, [int(c) for c in close.columns],
                             members)
             .rename(columns=str))
-    years = len(close) / 252
 
     print(f"MOMENTUM -- 12-1, monthly, long-only top {TOP_N}, equal weight, "
           f"band {BAND:.1%}")
@@ -113,8 +112,8 @@ def main() -> None:
     pit = equal_weight_index(wide, bench_mask)
     pit_years = len(wide) / 252
     pit_cagr = pit.iloc[-1] ** (1.0 / pit_years) - 1.0
-    print(f"\nBENCHMARK -- point-in-time equal weight, daily, zero cost "
-          f"(the Day 8-2 arm)")
+    print("\nBENCHMARK -- point-in-time equal weight, daily, zero cost "
+          "(the Day 8-2 arm)")
     print(f"  total {pit.iloc[-1] - 1.0:>9.2%}   annualised {pit_cagr:>7.2%}")
 
     # ---------------------------------------------------------- the runs

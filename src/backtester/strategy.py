@@ -12,7 +12,8 @@ class Strategy(ABC):
 
     @abstractmethod
     def on_market(self, event: MarketEvent, events: queue.Queue) -> None:
-        ...
+        """React to a new bar: read history from the data handler, put
+        SignalEvents on the queue. The only entry point a strategy has."""
 
 
 class BuyAndHoldStrategy(Strategy):
@@ -32,6 +33,7 @@ class BuyAndHoldStrategy(Strategy):
         self._bars_seen = 0
 
     def on_market(self, event: MarketEvent, events: queue.Queue) -> None:
+        """Emit one long signal once the warmup has passed, then stay silent."""
         self._bars_seen += 1
         if self.invested or self._bars_seen <= self.warmup:
             return
@@ -52,6 +54,7 @@ class AlternatingStrategy(Strategy):
         self.long = False
 
     def on_market(self, event: MarketEvent, events: queue.Queue) -> None:
+        """Flip between fully long and flat, every single bar."""
         self.long = not self.long
         events.put(SignalEvent(
             timestamp=event.timestamp,
@@ -111,6 +114,9 @@ class CrossSectionalMomentumStrategy(Strategy):
         self._holding: set = set()
 
     def on_market(self, event: MarketEvent, events: queue.Queue) -> None:
+        """On a formation date: rank, take the top_n, emit +1 for the chosen
+        and 0 for every other live name and dead ex-holding. Between
+        formation dates: count down and stay silent."""
         if self._bars_since_form is not None:
             self._bars_since_form += 1
             if self._bars_since_form < self.rebalance:

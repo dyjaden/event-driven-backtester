@@ -37,6 +37,7 @@ class TargetWeightSizer(Sizer):
         self.weight = float(weight)
 
     def target_quantity(self, *, direction, price, equity, initial_capital):
+        """weight x CURRENT equity at this price, truncated to whole shares."""
         return int(equity * self.weight * direction / price)
 
 
@@ -53,6 +54,7 @@ class FixedFractionalSizer(Sizer):
         self.fraction = float(fraction)
 
     def target_quantity(self, *, direction, price, equity, initial_capital):
+        """fraction x INITIAL capital at this price -- never compounds."""
         return int(initial_capital * self.fraction * direction / price)
 
 
@@ -69,6 +71,7 @@ class FixedQuantitySizer(Sizer):
         self.quantity = int(quantity)
 
     def target_quantity(self, *, direction, price, equity, initial_capital):
+        """Exactly N shares, signed by direction."""
         return self.quantity * direction
 
 class Portfolio:
@@ -110,6 +113,7 @@ class Portfolio:
              for sym, qty in self.positions.items() if qty)
 
     def equity(self, data: HistoricBarHandler) -> float:
+        """Cash plus the market value of everything held, at current marks."""
         return self.cash + self.holdings_value(data)
 
     # ------------------------------------------------------------- hooks
@@ -153,6 +157,7 @@ class Portfolio:
 
     # ------------------------------------------------------------- output
     def equity_curve(self) -> pd.Series:
+        """The per-bar account value recorded by mark_to_market, as a Series."""
         if not self.equity_history:
             return pd.Series(dtype=float, name="equity")
         idx, vals = zip(*self.equity_history)

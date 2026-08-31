@@ -11,8 +11,11 @@ trials are the one thing that number cannot forgive.
 
 THE CACHE DIES WITH THE ENGINE. A cached Sharpe from before an engine change
 is a measurement of software that no longer exists -- delete
-results/sweep_cache.csv in any commit that touches src/backtester/, and let
-the sweeps rerun. Slow honesty beats fast fiction.
+results/sweep_cache.csv in any commit that CHANGES BEHAVIOUR under
+src/backtester/, and let the sweeps rerun. A comment-or-docstring-only
+commit changes no measurement and keeps the cache, and says so in its
+commit message -- an exception used silently stops being a rule. Slow
+honesty beats fast fiction.
 
 The grids are frozen in the Day 11 guide before the first run. Extending
 them is allowed; the registry counts it and the deflated Sharpe pays for it.
@@ -358,7 +361,7 @@ def main() -> None:
     print(f"  BREADTH VERDICT: {verdict}")
 
     # -------------------------------------------- Step 3: the AUM ladder
-    print(f"\nCAPACITY  (default config, gross rerun at every rung)")
+    print("\nCAPACITY  (default config, gross rerun at every rung)")
     rungs = []
     for cap in AUM_LADDER:
         n, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
@@ -401,7 +404,7 @@ def main() -> None:
               f"wall, reappearing at the illiquid tail")
 
     # ------------------------------------------ Step 4a: the cost slices
-    print(f"\nCOST SENSITIVITY  (default config, $10M)")
+    print("\nCOST SENSITIVITY  (default config, $10M)")
 
     def slice_row(x, res):
         return {"x": x, "sharpe": float(res["sharpe"].iloc[0]),
@@ -436,9 +439,9 @@ def main() -> None:
 
     slope = ((spread_t["sharpe"].iloc[-1] - spread_t["sharpe"].iloc[0])
              / (spread_t["x"].iloc[-1] - spread_t["x"].iloc[0]))
-    print(f"  spread slice : " + "  ".join(
+    print("  spread slice : " + "  ".join(
         f"{r['x']:g}bp {r['sharpe']:.2f}" for _, r in spread_t.iterrows()))
-    print(f"  impact slice : " + "  ".join(
+    print("  impact slice : " + "  ".join(
         f"Y={r['x']:g} {r['sharpe']:.2f}" for _, r in impact_t.iterrows()))
     print(f"  SLOPE: each basis point of assumed half-spread costs "
           f"~{abs(slope):.3f} Sharpe here. The expectation was that this "

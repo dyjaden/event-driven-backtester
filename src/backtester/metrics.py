@@ -27,6 +27,7 @@ def log_returns(prices: pd.Series) -> pd.Series:
 
 
 def total_return(prices: pd.Series) -> float:
+    """Growth over the whole series: last over first, minus one."""
     return float(prices.iloc[-1] / prices.iloc[0] - 1.0)
 
 
@@ -81,6 +82,7 @@ def max_drawdown(equity: pd.Series) -> float:
 
 
 def calmar_ratio(equity: pd.Series, periods_per_year: int = TRADING_DAYS) -> float:
+    """CAGR over |max drawdown|; NaN when the drawdown is zero or undefined."""
     mdd = max_drawdown(equity)
     if mdd == 0 or np.isnan(mdd):
         return np.nan
@@ -96,6 +98,7 @@ def hit_rate(returns: pd.Series) -> float:
 
 def summary(equity: pd.Series, risk_free: float = 0.0,
             periods_per_year: int = TRADING_DAYS) -> dict:
+    """Every headline metric of an equity curve, in one dict."""
     r = simple_returns(equity)
     return {
         "total_return": total_return(equity),

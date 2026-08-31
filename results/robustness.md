@@ -8,7 +8,8 @@ cell. Grids were frozen in the Day 11 guide before the first run.
 Reproduce: `python scripts/sweep_report.py` (~45 min cold; seconds warm —
 every backtest lands in `results/sweep_cache.csv`, which is both the cache
 and the **trial registry**. The cache dies with the engine: delete it in
-any commit that touches `src/backtester/`.)
+any commit that changes behaviour under `src/backtester/`; a
+docstring-only commit keeps it and says so in its message.)
 
 ## The sensitivity surface
 

@@ -7,13 +7,18 @@ from abc import ABC, abstractmethod
 
 # ------------------------------------------------------------- commission
 class CommissionModel(ABC):
+    """What a fill costs in fees. Stateless: a pure function of the order."""
+
     @abstractmethod
     def commission(self, quantity: int, fill_price: float) -> float:
         """Always a POSITIVE cost, whatever the sign of quantity."""
 
 
 class ZeroCommission(CommissionModel):
+    """The free-trading arm; control group for every cost comparison."""
+
     def commission(self, quantity: int, fill_price: float) -> float:
+        """Always 0.0."""
         return 0.0
 
 
@@ -35,6 +40,7 @@ class PerShareCommission(CommissionModel):
         self.max_pct_of_value = float(max_pct_of_value)
 
     def commission(self, quantity: int, fill_price: float) -> float:
+        """max(per-share rate, minimum), capped at a fraction of trade value."""
         shares = abs(int(quantity))
         if shares == 0:
             return 0.0
@@ -45,13 +51,18 @@ class PerShareCommission(CommissionModel):
 
 # --------------------------------------------------------------- slippage
 class SlippageModel(ABC):
+    """Where inside the spread you actually transact."""
+
     @abstractmethod
     def fill_price(self, quantity: int, mid: float) -> float:
         """The price you ACTUALLY get. Never better than mid."""
 
 
 class ZeroSlippage(SlippageModel):
+    """Fills exactly at mid; the frictionless arm."""
+
     def fill_price(self, quantity: int, mid: float) -> float:
+        """Always mid."""
         return mid
 
 
@@ -69,11 +80,14 @@ class HalfSpreadSlippage(SlippageModel):
         self.spread_bps = float(spread_bps)
 
     def fill_price(self, quantity: int, mid: float) -> float:
+        """mid plus/minus half the spread, always against the trader."""
         half = mid * (self.spread_bps / 10_000.0) / 2.0
         return mid + half if quantity > 0 else mid - half
 
 # ----------------------------------------------------------------- impact
 class ImpactModel(ABC):
+    """How much your own order moves the price against you."""
+
     @abstractmethod
     def price_move(self, quantity: int, price: float,
                    adv: float, daily_vol: float) -> float:
@@ -88,6 +102,7 @@ class ZeroImpact(ImpactModel):
 
     def price_move(self, quantity: int, price: float,
                    adv: float, daily_vol: float) -> float:
+        """Always 0.0."""
         return 0.0
 
 
@@ -111,6 +126,8 @@ class SquareRootImpact(ImpactModel):
 
     def price_move(self, quantity: int, price: float,
                    adv: float, daily_vol: float) -> float:
+        """price * Y * daily_vol * sqrt(participation); 0.0 when the
+        trailing stats are missing or non-positive (NaN-safe by design)."""
         # `not (x > 0)` rather than `x <= 0`, because NaN fails both
         # comparisons and must fall through to the zero branch.
         if quantity == 0 or not (adv > 0) or not (daily_vol > 0):

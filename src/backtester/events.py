@@ -48,8 +48,10 @@ class FillEvent:
 
     @property
     def gross_value(self) -> float:
+        """Signed dollars exchanged: quantity x fill price, costs excluded."""
         return self.quantity * self.fill_price
 
     @property
     def total_cost(self) -> float:
+        """Commission plus impact: what the fill cost beyond gross_value."""
         return self.commission + self.impact_cost

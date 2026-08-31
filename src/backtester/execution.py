@@ -35,6 +35,10 @@ class SimulatedExecutionHandler:
 
     def on_order(self, event: OrderEvent, events: queue.Queue,
                  data: HistoricBarHandler) -> None:
+        """Turn an order into a fill: cap the quantity at max_participation
+        of trailing ADV, price it with slippage, charge commission and
+        impact, emit the FillEvent. An order capped to zero emits nothing
+        this bar -- the strategy will ask again."""
         mid = data.current_price(event.symbol)
         adv = data.adv(event.symbol, self.window)
         quantity = event.quantity

@@ -46,6 +46,24 @@ was created, because time only advances when the queue is empty.
 the portfolio decides *how much*, which is why risk rules can change without
 touching strategy logic.
 
+Ownership, stated once: **sizing lives in the Portfolio, never in the
+Strategy**; **time lives in the data handler's cursor** — components ask
+the handler what "now" is, and nothing outside it may hold the full price
+matrix; **money moves only in `Portfolio.on_fill`**; and costs are three
+swappable models plus one hard participation cap, all in the execution
+layer.
+
+| Module | Owns |
+|---|---|
+| `events.py` | the four frozen message types |
+| `data.py` | bars, the cursor, trailing stats — single-symbol and panel |
+| `strategy.py` | direction only; never cash, never positions |
+| `portfolio.py` | cash, positions, sizing, the rebalance band, the equity curve |
+| `execution.py` + `costs.py` | fills, spread, commission, impact, the participation cap |
+| `crsp.py` | CIZ Parquet → panel, point-in-time membership |
+| `metrics.py` | Sharpe, drawdown, the deflated Sharpe — written before any strategy existed |
+| `walkforward.py` | folds, embargoed selection, stitching |
+
 ## Status
 
 Engine, portfolio accounting, pluggable position sizing, commission and

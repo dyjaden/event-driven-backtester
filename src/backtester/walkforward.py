@@ -42,6 +42,8 @@ class Config:
 
 @dataclass(frozen=True)
 class Fold:
+    """One train/test window pair; every boundary is a real bar."""
+
     train_start: pd.Timestamp
     train_end: pd.Timestamp
     test_start: pd.Timestamp

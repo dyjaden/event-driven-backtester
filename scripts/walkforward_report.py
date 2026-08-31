@@ -122,7 +122,7 @@ def main() -> None:
     sel_vs_def = summary(oos_sel)["sharpe"] - summary(oos_def)["sharpe"]
     n_nondef = sum(1 for r in rows if r["chosen"] != DEFAULT_CONFIG)
     picked_skip0 = sum(1 for r in rows if r["chosen"].skip == 0)
-    print(f"\nDEGRADATION")
+    print("\nDEGRADATION")
     print(f"  mean train Sharpe of chosen configs : {mean_train:>5.2f}")
     print(f"  mean test  Sharpe of chosen configs : {mean_test:>5.2f}   "
           f"(IS -> OOS: {mean_test - mean_train:+.2f})")
