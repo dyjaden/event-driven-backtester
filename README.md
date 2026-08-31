@@ -409,33 +409,58 @@ The repair is in `scripts/fix_yfinance_volume.py`, with the invariant asserted i
 CRSP-to-yfinance dollar-volume ratio reads 1.000 at both ends of the sample,
 two vendors agreeing on how many dollars traded.
 
-## Installation
+## Reproduce
+
+### No account needed
+
+A fresh clone runs the suite and every report against fabricated
+CIZ-shaped data — no WRDS subscription, no market data, roughly ten
+minutes end to end (this exact sequence is verified from a clean clone
+before every release):
 
 ```bash
 git clone https://github.com/dyjaden/event-driven-backtester.git
 cd event-driven-backtester
-python -m venv .venv && .venv\Scripts\Activate.ps1
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-python -m pytest
+python -m pytest -q                  # 117 passed
+python scripts/make_fake_crsp.py
+python scripts/crsp_report.py        --data data/_dryrun
+python scripts/momentum_report.py    --data data/_dryrun
+python scripts/walkforward_report.py --data data/_dryrun
+python scripts/sweep_report.py       --data data/_dryrun
 ```
 
-To reproduce the exact figures in this README, install the pinned versions
-instead: `python -m pip install -r requirements.txt`
+The fabricated numbers are fiction and look it — a seeded drift-walk
+panel hands momentum a Sharpe of 2.5. The shapes, the eleven-year
+calendar, and every code path are the contract. A rehearsal writes its
+cache and figures inside `data/_dryrun/`, never into `results/`: the
+real trial registry and the published figures cannot be touched by
+fiction.
+
+### With WRDS
+
+`data/` is gitignored by design — CRSP is licensed and never ships with
+the repository. With a WRDS account:
+
+```bash
+python scripts/pull_crsp.py --start 2015-01-01 --end 2025-12-31 --universe
+python scripts/crsp_report.py                # seconds
+python scripts/momentum_report.py            # ~15 min
+python scripts/walkforward_report.py         # ~1 h
+python scripts/sweep_report.py               # ~45 min cold; seconds warm
+```
+
+The pull runs in a separate environment because the `wrds` package pins
+an older pandas; the Parquet handoff does not care. To reproduce the
+exact figures in this README, install the pinned versions first:
+`python -m pip install -r requirements.txt`. Without any of this, the
+engine runs on any OHLCV frame that keeps price and volume on a single
+basis; `scripts/fix_yfinance_volume.py` repairs Yahoo's mixed-basis
+files.
 
 Run the demo with `python -m backtester.engine`.
-
-### Data
-
-`data/` is gitignored: CRSP is licensed and never ships with the repository.
-With a WRDS account, `scripts/pull_crsp.py --start 2015-01-01 --end 2025-12-31
---universe` rebuilds every file (the pull runs in a separate environment
-because the `wrds` package pins an older pandas; the Parquet handoff does not
-care). Without one, the engine runs on any OHLCV frame that keeps price and
-volume on a single basis; `scripts/fix_yfinance_volume.py` repairs Yahoo's
-mixed-basis files, and `scripts/make_fake_crsp.py` fabricates CIZ-shaped data
-so `scripts/crsp_report.py --data data/_dryrun` and
-`scripts/momentum_report.py --data data/_dryrun` exercise the full reporting
-paths with no subscription at all.
 
 ## Limitations
 

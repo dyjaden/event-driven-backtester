@@ -23,6 +23,29 @@ import pandas as pd
 OUT = Path("data/_dryrun")
 
 
+def synthetic_spy(start="2015-01-02", end="2025-12-31",
+                  seed: int = 5) -> pd.DataFrame:
+    """An OHLCV frame shaped like the Day 1 yfinance pull, for clones that
+    do not have one (data/ is gitignored by design). Business-day calendar
+    over the same eleven years as the real window, so lookbacks and
+    calendar folds behave identically; a seeded drift-plus-noise walk for
+    the prices. The numbers are fiction. The shape and the window are the
+    contract, and they are what downstream code is tested against."""
+    dates = pd.bdate_range(start, end)
+    rng = np.random.default_rng(seed)
+    ret = rng.normal(0.0005, 0.011, len(dates))
+    ret[0] = 0.0
+    close = 200.0 * np.cumprod(1.0 + ret)
+    spread = np.abs(rng.normal(0.004, 0.002, len(dates)))
+    return pd.DataFrame({
+        "open": close * (1 - spread / 2),
+        "high": close * (1 + spread),
+        "low": close * (1 - spread),
+        "close": close,
+        "volume": rng.integers(60_000_000, 120_000_000, len(dates)).astype(float),
+    }, index=dates)
+
+
 def fake_spy(yf_frame: pd.DataFrame, permno: int = 84398,
              div_yield: float = 0.017, anchor: float = 205.43) -> pd.DataFrame:
     """CIZ daily rows for one ETF, derived from the yfinance frame.
@@ -109,7 +132,14 @@ def main() -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    yf_frame = pd.read_parquet(args.src)
+    src = Path(args.src)
+    if src.exists():
+        yf_frame = pd.read_parquet(src)
+        print(f"calendar and SPY shape taken from {src}")
+    else:
+        yf_frame = synthetic_spy()
+        print(f"{src} not found (data/ is gitignored by design) -- "
+              f"synthesizing an 11-year business-day calendar instead")
     yf_frame.to_parquet(out / "SPY_daily.parquet")
     fixed = Path("data/SPY_daily_dollarvol.parquet")
     if fixed.exists():

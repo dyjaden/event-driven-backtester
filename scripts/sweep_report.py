@@ -323,6 +323,17 @@ def main() -> None:
     args = ap.parse_args()
     data = Path(args.data)
 
+    # A rehearsal (--data anything but the real pull) gets its own cache and
+    # its own output directory, INSIDE the data dir it ran against. The real
+    # trial registry records real backtests only, and a dry run must never
+    # overwrite the published figures -- fiction stays in fiction's folder.
+    rehearsal = data != Path("data")
+    cache_path = (data / "sweep_cache.csv") if rehearsal else CACHE
+    outdir = data if rehearsal else Path("results")
+    if rehearsal:
+        print(f"REHEARSAL -- cache and figures under {data}/, "
+              f"the real registry is untouched")
+
     uni = pd.read_parquet(data / "crsp_universe_daily.parquet")
     members = pd.read_parquet(data / "crsp_sp500_membership.parquet")
     close, volume = to_panel(uni, members)
@@ -330,19 +341,20 @@ def main() -> None:
                             members).rename(columns=str))
     start, end = close.index[0], close.index[-1]
 
-    print(f"SWEEP RUNNER -- cache {CACHE} "
-          f"({'exists' if CACHE.exists() else 'new'})")
+    print(f"SWEEP RUNNER -- cache {cache_path} "
+          f"({'exists' if cache_path.exists() else 'new'})")
     df, ran = sweep(close, volume, mask, SURFACE + BREADTH,
-                    start=start, end=end, tag="net")
+                    start=start, end=end, tag="net", cache_path=cache_path)
     print(f"\n  surface+breadth: {len(df)} configs, {ran} freshly run, "
           f"{len(df) - ran} from cache")
     print(f"  registry trial count (incl. walk-forward's 12): "
-          f"{registry_trial_count()}")
+          f"{registry_trial_count(cache_path)}")
 
     # ---------------------------------------- Step 2: the surface, drawn
     surface_df = df.iloc[:len(SURFACE)]
     breadth_df = df.iloc[len(SURFACE):]
-    draw_heatmap(surface_df)
+    draw_heatmap(surface_df, png=outdir / "sensitivity_heatmap.png",
+                 csv=outdir / "sensitivity_heatmap.csv")
 
     print("\nBREADTH  (L252/S21/R21, $10M, all costs on)")
     print(f"  {'top_n':>6} {'sharpe':>7} {'cagr':>7} {'maxDD':>8} "
@@ -365,10 +377,12 @@ def main() -> None:
     rungs = []
     for cap in AUM_LADDER:
         n, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
-                     start=start, end=end, tag="net", capital=cap)
+                     start=start, end=end, tag="net", capital=cap,
+                     cache_path=cache_path)
         g, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
                      start=start, end=end, tag="gross", capital=cap,
-                     execution_factory=NaiveExecutionHandler)
+                     execution_factory=NaiveExecutionHandler,
+                     cache_path=cache_path)
         rungs.append({
             "capital": cap,
             "gross_cagr": float(g["cagr"].iloc[0]),
@@ -382,7 +396,8 @@ def main() -> None:
             "impact": float(n["impact"].iloc[0]),
         })
     ladder = pd.DataFrame(rungs)
-    aum1, aum2 = draw_capacity(ladder)
+    aum1, aum2 = draw_capacity(ladder, png=outdir / "capacity_curve.png",
+                               csv=outdir / "capacity_curve.csv")
 
     print(f"  {'AUM':>9} {'gross':>7} {'net':>7} {'drag':>8} {'sharpe':>7} "
           f"{'turnover':>9}")
@@ -416,26 +431,32 @@ def main() -> None:
     for bp in SPREADS_BP:
         if bp == 1.0:                      # the loaded arm IS 1 bp / Y=1.0
             r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
-                         start=start, end=end, tag="net")
+                         start=start, end=end, tag="net",
+                         cache_path=cache_path)
         else:
             r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
                          start=start, end=end, tag=f"spread{bp:g}bp",
                          execution_factory=execution_with(spread_bps=bp,
-                                                          impact_y=1.0))
+                                                          impact_y=1.0),
+                         cache_path=cache_path)
         spread_rows.append(slice_row(bp, r))
     for y in IMPACT_YS:
         if y == 1.0:
             r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
-                         start=start, end=end, tag="net")
+                         start=start, end=end, tag="net",
+                         cache_path=cache_path)
         else:
             r, _ = sweep(close, volume, mask, (DEFAULT_CONFIG,),
                          start=start, end=end, tag=f"impactY{y:g}",
                          execution_factory=execution_with(spread_bps=1.0,
-                                                          impact_y=y))
+                                                          impact_y=y),
+                         cache_path=cache_path)
         impact_rows.append(slice_row(y, r))
     spread_t = pd.DataFrame(spread_rows)
     impact_t = pd.DataFrame(impact_rows)
-    draw_cost_sensitivity(spread_t, impact_t)
+    draw_cost_sensitivity(spread_t, impact_t,
+                          png=outdir / "cost_sensitivity.png",
+                          csv=outdir / "cost_sensitivity.csv")
 
     slope = ((spread_t["sharpe"].iloc[-1] - spread_t["sharpe"].iloc[0])
              / (spread_t["x"].iloc[-1] - spread_t["x"].iloc[0]))
@@ -460,7 +481,7 @@ def main() -> None:
     best = strat.loc[strat["sharpe"].idxmax()]
     best_cfg = Config(int(best["lookback"]), int(best["skip"]),
                       int(best["top_n"]), int(best["rebalance"]))
-    n = registry_trial_count()
+    n = registry_trial_count(cache_path)
     curve = run_window(close, volume, mask, best_cfg, start, end,
                        capital=CAPITAL)      # re-measure for daily returns
     rets = curve.pct_change().dropna()
