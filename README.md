@@ -1,14 +1,14 @@
-# event-driven-backtester
+# Event-driven-backtester
 
-An event-driven backtesting engine in pure Python, built around one idea: **most
+An event driven backtesting engine in pure Python, built around one idea: **most
 backtests are wrong, and the interesting engineering is in the parts that make
 them wrong.**
 
-Look-ahead bias, survivorship bias, transaction costs and market impact are
+Look ahead bias, survivorship bias, transaction costs and market impact are
 modelled explicitly rather than assumed away, and every result states the
 capital it was produced at.
 
-## Results (measured, not claimed)
+## Measured Results
 
 | What | Number | Window / trials |
 |---|---|---|
@@ -24,7 +24,7 @@ capital it was produced at.
 
 Every number above travels with its window and its trial count, because a
 number without them is a claim rather than a measurement. The engine's job
-was never to find an edge — it was to measure honestly, including when the
+was not to find an edge; it was to measure honestly, including when the
 honest answer is a loss.
 
 ## How it works
