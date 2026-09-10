@@ -1,5 +1,7 @@
 # event-driven-backtester
 
+[![ci](https://github.com/dyjaden/event-driven-backtester/actions/workflows/ci.yml/badge.svg)](https://github.com/dyjaden/event-driven-backtester/actions/workflows/ci.yml)
+
 An event-driven backtesting engine in pure Python. I built it around one
 idea: most backtests are wrong, and the interesting engineering lives in
 the parts that make them wrong.
@@ -74,7 +76,7 @@ cross-sectional book, with an explicit exit policy for names that delist
 mid-hold. Walk-forward validation shipped 28 August. The robustness
 screens (sensitivity surface, capacity, cost sensitivity, and the
 deflated Sharpe with its trial registry) shipped 30 August. **117 tests,
-47 registered trials.**
+47 registered trials, CI on every push.**
 
 Data migrated from Yahoo Finance to CRSP CIZ daily (PERMNO-keyed,
 point-in-time universe, delisting returns) on 24 August 2026.
@@ -437,9 +439,13 @@ ends of the sample, two vendors agreeing on how many dollars traded.
 ### No account needed
 
 A fresh clone runs the suite and every report against fabricated
-CIZ-shaped data. No WRDS subscription, no market data, roughly ten
-minutes end to end. I verify this exact sequence from a clean clone
-before every release:
+CIZ-shaped data. No WRDS subscription, no market data, about half an
+hour end to end: the walk-forward's 96 training runs and the cold sweep
+dominate. (An earlier version of this line claimed ten minutes; a
+stopwatch disagreed, and the stopwatch wins.) CI runs the test suite on
+every push, and this exact sequence on every release tag and on demand,
+which automates the rule it replaces: verify the stranger's path before
+every release.
 
 ```bash
 git clone https://github.com/dyjaden/event-driven-backtester.git

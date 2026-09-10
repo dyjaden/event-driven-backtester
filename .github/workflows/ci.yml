@@ -1,0 +1,51 @@
+﻿name: ci
+
+# Two tiers, matching how this repo actually makes claims.
+#
+# `test` runs the suite on every push and pull request: the same green
+# check the limit-order-book repo carries, and the fast guarantee that
+# no commit lands with a broken invariant.
+#
+# `stranger` runs the README's full no-account sequence, exactly as a
+# stranger with a fresh clone would: fabricate the CIZ-shaped dry-run
+# data, then run every report end to end. The v1.0 release day found
+# three defects the suite alone could not see, because they lived in
+# what a clean clone lacks (gitignored data, untracked figures). This
+# job exists so that class of defect can never come back silently. It
+# is too slow for every push, so it runs on release tags and on demand
+# from the Actions tab, which automates the by-hand rule it replaces:
+# verify the stranger's path before every release.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+
+  stranger:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+      - run: python scripts/make_fake_crsp.py
+      - run: python scripts/crsp_report.py --data data/_dryrun
+      - run: python scripts/momentum_report.py --data data/_dryrun
+      - run: python scripts/walkforward_report.py --data data/_dryrun
+      - run: python scripts/sweep_report.py --data data/_dryrun
