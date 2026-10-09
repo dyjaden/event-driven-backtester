@@ -512,8 +512,21 @@ believed.
   Empirical estimates span roughly 0.3 to 1.5. Nobody audits this number,
   and halving it roughly halves the modelled cost, so results are
   reported across a range.
-- **The same is true of the spread.** Reported across 1-5 bp rather than
-  at a single value.
+- **The same is true of the spread, and the parameter's name hides a
+  factor of two.** `HalfSpreadSlippage(spread_bps)` takes the full
+  quoted spread and fills at the mid plus or minus half of it, so the
+  runs labelled "1 bp half-spread" charged 0.5 bp per side; results are
+  reported across 1-5 bp rather than at a single value. The assumption
+  has since been measured against the consolidated tape by the
+  [limit-order-book](https://github.com/dyjaden/limit-order-book/blob/main/results/spread_audit.md):
+  on 2012-06-21, across 51 S&P 500 names (five per dollar-volume decile
+  plus AAPL), the median half effective spread, the one-way cost of
+  crossing, was 1.7 bps; a 1 bp half-spread is right for the top
+  dollar-volume decile (median 1.1 bps), 1.7x light for the median name
+  and 2.7x light in the bottom decile, and the 0.5 bp this code charged
+  is 3.4x and 5.5x light. By the cost-sensitivity screen above
+  (`results/robustness.md`) that is under 0.01 Sharpe at this book's
+  turnover: the label is off by more than the result.
 - **Impact is a participation cap, not an execution schedule.**
   Almgren-Chriss solves for an optimal trajectory that trades impact
   against timing risk. This models the impact law and clips the order; it
